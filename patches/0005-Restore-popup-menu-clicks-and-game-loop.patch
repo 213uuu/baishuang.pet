@@ -1,0 +1,202 @@
+From c0dde9c908a61e91e88240978360c19e29a64fb9 Mon Sep 17 00:00:00 2001
+From: 213uuu <213uuu@users.noreply.github.com>
+Date: Thu, 22 Oct 2026 22:28:04 +0800
+Subject: [PATCH 5/7] Restore popup menu clicks and game loop
+
+---
+ CHANGELOG.md                 |  6 ++++++
+ desktop_pet.py               | 18 ++++++++++++++--
+ pyproject.toml               |  2 +-
+ tests/test_game_loop.py      | 42 ++++++++++++++++++++++++++++++++++++
+ tests/test_no_focus_steal.py |  7 +++---
+ 5 files changed, 69 insertions(+), 6 deletions(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 0795b2d..a2a5122 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,11 @@
+ # Changelog
+ 
++## 0.1.6 - 2026-10-22
++
++- Restored reliable popup-menu clicks by briefly forcing focus only for user-opened menus.
++- Restored the previous foreground application immediately after the menu closes.
++- Added a real Tk menu regression test that clicks “玩游戏” and verifies the repeating game loop.
++
+ ## 0.1.5 - 2026-10-22
+ 
+ - Fixed the gaming intro being diverted to work animation by pending work state.
+diff --git a/desktop_pet.py b/desktop_pet.py
+index e1f5a1c..0fc4d1f 100644
+--- a/desktop_pet.py
++++ b/desktop_pet.py
+@@ -678,6 +678,8 @@ class Pet:
+         # Tk 9 在当前桌面环境无法分配原生 Menu，右键菜单改用自绘 Toplevel。
+         self._context_menu: tk.Toplevel | None = None
+         self._mode_selector: tk.Toplevel | None = None
++        self._menu_restore_foreground = 0
++        self._selector_restore_foreground = 0
+         self._last_context_menu_at = 0.0
+         self._pet_mode = load_pet_mode()
+         self._extra_menu_mode = self._pet_mode == "animation"
+@@ -911,6 +913,7 @@ class Pet:
+         self._last_context_menu_at = now
+         self._close_context_menu()
+         self._close_mode_selector()
++        self._menu_restore_foreground = foreground_hwnd()
+         menu = tk.Toplevel(self.root)
+         menu.withdraw()
+         menu.overrideredirect(True)
+@@ -969,7 +972,8 @@ class Pet:
+         menu.bind("<Escape>", lambda _e: self._close_context_menu())
+         menu.bind("<FocusOut>", lambda _e: self.root.after_idle(self._close_context_menu))
+         menu.deiconify()
+-        menu.focus_set()
++        menu.lift()
++        menu.focus_force()
+         log("右键菜单已弹出")
+         return "break"
+ 
+@@ -985,6 +989,10 @@ class Pet:
+                 menu.destroy()
+             except tk.TclError:
+                 pass
++        previous = self._menu_restore_foreground
++        self._menu_restore_foreground = 0
++        if previous:
++            self.root.after_idle(lambda: restore_foreground(previous))
+ 
+     def _close_mode_selector(self) -> None:
+         selector = self._mode_selector
+@@ -994,9 +1002,14 @@ class Pet:
+                 selector.destroy()
+             except tk.TclError:
+                 pass
++        previous = self._selector_restore_foreground
++        self._selector_restore_foreground = 0
++        if previous:
++            self.root.after_idle(lambda: restore_foreground(previous))
+ 
+     def _open_mode_selector(self) -> None:
+         self._close_mode_selector()
++        self._selector_restore_foreground = foreground_hwnd()
+         selector = tk.Toplevel(self.root)
+         selector.withdraw()
+         selector.overrideredirect(True)
+@@ -1050,7 +1063,8 @@ class Pet:
+             lambda _e: self.root.after_idle(self._close_mode_selector),
+         )
+         selector.deiconify()
+-        selector.focus_set()
++        selector.lift()
++        selector.focus_force()
+         log("模式选择菜单已弹出")
+ 
+     def _select_pet_mode(self, mode: str) -> None:
+diff --git a/pyproject.toml b/pyproject.toml
+index 604fe1c..954f007 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,6 +1,6 @@
+ [project]
+ name = "baishuang-pet"
+-version = "0.1.5"
++version = "0.1.6"
+ description = "A Windows desktop pet with Codex and DeepSeek Harness integration"
+ readme = "README.md"
+ requires-python = ">=3.10"
+diff --git a/tests/test_game_loop.py b/tests/test_game_loop.py
+index 50204a5..4287729 100644
+--- a/tests/test_game_loop.py
++++ b/tests/test_game_loop.py
+@@ -3,6 +3,7 @@ from __future__ import annotations
+ import pathlib
+ import time
+ import unittest
++from types import SimpleNamespace
+ 
+ import desktop_pet
+ 
+@@ -26,6 +27,13 @@ class GameLoopPriorityTests(unittest.TestCase):
+ 
+     def tearDown(self) -> None:
+         self.pet._startup_animation.close(notify=False)
++        try:
++            for after_id in self.pet.root.tk.splitlist(
++                self.pet.root.tk.call("after", "info")
++            ):
++                self.pet.root.after_cancel(after_id)
++        except Exception:
++            pass
+         self.pet.root.destroy()
+ 
+     def _start_gaming_with_pending_work(self) -> None:
+@@ -59,6 +67,40 @@ class GameLoopPriorityTests(unittest.TestCase):
+         self.assertEqual(self.pet.state, "anim-game-loop")
+         self.assertFalse(self.pet.play_once)
+ 
++    def test_menu_click_starts_gaming_and_enters_loop(self) -> None:
++        self.pet._extra_menu_mode = True
++        self.pet._work_entry_pending = "normal"
++        self.pet._on_menu(SimpleNamespace(x_root=200, y_root=200))
++        self.pet.root.update()
++
++        def labels(widget):
++            result = []
++            for child in widget.winfo_children():
++                try:
++                    if child.winfo_class() == "Label":
++                        result.append(child)
++                except Exception:
++                    pass
++                result.extend(labels(child))
++            return result
++
++        play_items = [
++            item
++            for item in labels(self.pet._context_menu)
++            if item.cget("text") == "玩游戏"
++        ]
++        self.assertTrue(play_items)
++        play_items[0].event_generate("<Button-1>")
++        self.pet.root.update()
++        self.assertEqual(self.pet.state, "anim-game-intro")
++        self.assertIsNone(self.pet._work_entry_pending)
++
++        self.pet.frame_index = len(self.pet.frames(self.pet.state)) - 1
++        self.pet._next_work_check = time.time() + 999
++        self.pet._tick_body()
++        self.assertEqual(self.pet.state, "anim-game-loop")
++        self.assertFalse(self.pet.play_once)
++
+ 
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/tests/test_no_focus_steal.py b/tests/test_no_focus_steal.py
+index b4ce0df..c89e5c0 100644
+--- a/tests/test_no_focus_steal.py
++++ b/tests/test_no_focus_steal.py
+@@ -27,15 +27,16 @@ class NoFocusStealTests(unittest.TestCase):
+         )
+         desktop_pet.Pet.show_balance(fake_pet)
+ 
+-    def test_window_menus_use_non_force_focus(self) -> None:
++    def test_window_menus_restore_foreground_after_focus(self) -> None:
+         for method in (
+             desktop_pet.Pet._on_menu,
+             desktop_pet.Pet._open_mode_selector,
+         ):
+             source = inspect.getsource(method)
+             with self.subTest(method=method.__name__):
+-                self.assertNotIn("focus_force", source)
+-                self.assertIn("focus_set", source)
++                self.assertIn("focus_force", source)
++        class_source = inspect.getsource(desktop_pet.Pet)
++        self.assertIn("restore_foreground(previous)", class_source)
+ 
+     def test_startup_player_does_not_lift_window(self) -> None:
+         source = inspect.getsource(desktop_pet.StartupAnimationPlayer.play)
+-- 
+2.53.0.windows.3
+

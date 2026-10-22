@@ -1,0 +1,319 @@
+From d0fee74050de9ece2fd91ab40056d31ff93dfe10 Mon Sep 17 00:00:00 2001
+From: 213uuu <213uuu@users.noreply.github.com>
+Date: Thu, 22 Oct 2026 21:23:12 +0800
+Subject: [PATCH 3/7] Prevent desktop pet from stealing foreground focus
+
+---
+ CHANGELOG.md                 |  7 +++++
+ README.md                    |  1 +
+ desktop_pet.py               | 59 +++++++++++++++++++++++++++--------
+ pet-tray.py                  |  7 ++++-
+ pyproject.toml               |  2 +-
+ tests/test_no_focus_steal.py | 60 ++++++++++++++++++++++++++++++++++++
+ 6 files changed, 122 insertions(+), 14 deletions(-)
+ create mode 100644 tests/test_no_focus_steal.py
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 66407d0..68287aa 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,12 @@
+ # Changelog
+ 
++## 0.1.4 - 2026-10-22
++
++- Prevented the pet from stealing foreground focus during startup, balance updates, and periodic topmost refreshes.
++- Kept the pet window topmost with non-activating Win32 flags.
++- Restored the previous foreground application after startup and tray-menu interaction.
++- Added regression tests covering focus and activation behavior.
++
+ ## 0.1.3 - 2026-10-22
+ 
+ - Shortened the network-blocked balance message to a single line.
+diff --git a/README.md b/README.md
+index 7f80321..2869090 100644
+--- a/README.md
++++ b/README.md
+@@ -11,6 +11,7 @@
+ - 透明置顶桌宠窗口，支持拖动、点击、连续点击和右键菜单。
+ - 多个逐帧动作状态与云朵气泡，气泡会根据实际轮廓重新换行和缩放。
+ - 动画边缘经过低强度绿色溢出清理，在深色桌面上不会出现明显绿边。
++- 启动、余额刷新和周期置顶不会抢走当前应用的前台焦点。
+ - 通过 Codex 实时日志与会话文件检测工作状态。
+ - 通过 `DSH_HOME` 会话文件检测 DeepSeek Harness 工作状态。
+ - Codex 与 DSH 同时工作时，播放“多次点击反应 A → 进入工作 → 稳定保持”路径。
+diff --git a/desktop_pet.py b/desktop_pet.py
+index 98923a4..184098b 100644
+--- a/desktop_pet.py
++++ b/desktop_pet.py
+@@ -327,6 +327,31 @@ def cursor_pos() -> tuple[int, int] | None:
+         return None
+ 
+ 
++def foreground_hwnd() -> int:
++    """返回当前前台窗口句柄；受限环境返回 0。"""
++    if sys.platform != "win32":
++        return 0
++    try:
++        user32 = ctypes.windll.user32
++        user32.GetForegroundWindow.restype = ctypes.wintypes.HWND
++        return int(user32.GetForegroundWindow() or 0)
++    except Exception:  # noqa: BLE001
++        return 0
++
++
++def restore_foreground(hwnd: int) -> None:
++    """把键盘焦点还给显示桌宠前的应用，失败时静默。"""
++    if sys.platform != "win32" or not hwnd:
++        return
++    try:
++        user32 = ctypes.windll.user32
++        user32.SetForegroundWindow.argtypes = [ctypes.wintypes.HWND]
++        if int(user32.GetForegroundWindow() or 0) != hwnd:
++            user32.SetForegroundWindow(ctypes.wintypes.HWND(hwnd))
++    except Exception:  # noqa: BLE001
++        pass
++
++
+ def load_pet_mode() -> str:
+     """读取持久化模式；默认立绘模式，未知内容也按立绘模式处理。"""
+     try:
+@@ -358,6 +383,7 @@ class StartupAnimationPlayer:
+         self.after_id: str | None = None
+         self.started_at = 0.0
+         self.last_index = -1
++        self.previous_foreground = 0
+ 
+     @property
+     def active(self) -> bool:
+@@ -370,6 +396,7 @@ class StartupAnimationPlayer:
+         if self.active:
+             log("启动动画已在播放，忽略重复启动请求")
+             return False
++        self.previous_foreground = foreground_hwnd()
+         width, height = STARTUP_ANIMATION_WIDTH, STARTUP_ANIMATION_HEIGHT
+         self.master.update_idletasks()
+         # 不把动画固定在屏幕中央：以白霜当前窗口为基准对齐末帧脚底锚点。
+@@ -404,7 +431,6 @@ class StartupAnimationPlayer:
+         self.window.bind("<Button-1>", self.close)
+         self.window.bind("<Escape>", self.close)
+         self.window.protocol("WM_DELETE_WINDOW", self.close)
+-        self.window.lift()
+         self.started_at = time.monotonic()
+         self.last_index = -1
+         log(
+@@ -582,6 +608,8 @@ class Pet:
+         # 必须在 tk.Tk() 之前切换桌面：一旦线程有了窗口就再也切不动了
+         self.desktop_note = attach_to_interactive_desktop()
+         self.root = tk.Tk()
++        # 启动阶段先隐藏本体，等入场动画结束时再以不抢焦点的方式显示。
++        self.root.withdraw()
+         self.root.overrideredirect(True)
+         self.root.attributes("-topmost", True)
+         if debug:
+@@ -837,7 +865,8 @@ class Pet:
+         """先校正首次启动位置，再以桌宠脚底为锚点播放开场动画。"""
+         self._recheck_placement()
+         self.root.update_idletasks()
+-        self.play_startup_animation()
++        if not self.play_startup_animation() and not self._startup_animation.active:
++            self._show_pet_root_passively()
+ 
+     def _set_topmost(self, topmost: bool) -> None:
+         """设置/取消置顶，不移动、不缩放、不抢焦点。
+@@ -940,8 +969,7 @@ class Pet:
+         menu.bind("<Escape>", lambda _e: self._close_context_menu())
+         menu.bind("<FocusOut>", lambda _e: self.root.after_idle(self._close_context_menu))
+         menu.deiconify()
+-        menu.lift()
+-        menu.focus_force()
++        menu.focus_set()
+         log("右键菜单已弹出")
+         return "break"
+ 
+@@ -1022,8 +1050,7 @@ class Pet:
+             lambda _e: self.root.after_idle(self._close_mode_selector),
+         )
+         selector.deiconify()
+-        selector.lift()
+-        selector.focus_force()
++        selector.focus_set()
+         log("模式选择菜单已弹出")
+ 
+     def _select_pet_mode(self, mode: str) -> None:
+@@ -1196,16 +1223,26 @@ class Pet:
+         self.say(GAME_LOOP_CHAT, hold=True)
+         log("额外动作进入游戏机循环段")
+ 
+-    def play_startup_animation(self) -> None:
++    def play_startup_animation(self) -> bool:
+         now = time.monotonic()
+         if self._startup_animation.active:
+             log("启动动画请求已忽略：当前动画仍在播放")
+-            return
++            return False
+         if now - self._last_startup_animation_started < 2.0:
+             log("启动动画请求已忽略：启动冷却中")
+-            return
++            return False
+         if self._startup_animation.play():
+             self._last_startup_animation_started = now
++            return True
++        return False
++
++    def _show_pet_root_passively(self) -> None:
++        """显示桌宠本体，但不把当前工作应用挤到后台。"""
++        previous = foreground_hwnd()
++        self._startup_animation_hidden = False
++        self.root.deiconify()
++        self._set_topmost(True)
++        restore_foreground(previous)
+ 
+     def _hide_for_startup_animation(self) -> None:
+         """动画期间隐藏桌宠本体，避免它压在入场画面上或被周期性置顶抬起。"""
+@@ -1227,8 +1264,8 @@ class Pet:
+         lift_px = 12
+         self.root.geometry(f"+{x}+{y - lift_px}")
+         self.root.deiconify()
+-        self.root.lift()
+         self._set_topmost(True)
++        restore_foreground(self._startup_animation.previous_foreground)
+         self._next_topmost = time.time() + TOPMOST_REASSERT_SECONDS
+         self.root.after(85, lambda: self.root.geometry(f"+{x}+{y + 3}"))
+         self.root.after(170, lambda: self.root.geometry(f"+{x}+{y}"))
+@@ -1331,7 +1368,6 @@ class Pet:
+     def show_balance(self) -> None:
+         # 余额气泡画在她自己的窗口里，先把窗口提到最上层，避免被别的窗口压住。
+         self._set_topmost(True)
+-        self.root.lift()
+         if self._balance_busy:
+             self.say("还在查呢，催什么催。", hold=True)
+             return
+@@ -1356,7 +1392,6 @@ class Pet:
+             return
+         self._balance_busy = False
+         self._set_topmost(True)
+-        self.root.lift()
+         self.say(result, hold=True)
+ 
+     # ---------------------------------------------------------------- Codex 状态
+diff --git a/pet-tray.py b/pet-tray.py
+index 67d5106..aa1c606 100644
+--- a/pet-tray.py
++++ b/pet-tray.py
+@@ -284,6 +284,8 @@ user32.TrackPopupMenu.argtypes = [
+ user32.TrackPopupMenu.restype = wt.UINT
+ user32.SetForegroundWindow.argtypes = [wt.HWND]
+ user32.SetForegroundWindow.restype = wt.BOOL
++user32.GetForegroundWindow.argtypes = []
++user32.GetForegroundWindow.restype = wt.HWND
+ user32.GetCursorPos.argtypes = [ctypes.POINTER(wt.POINT)]
+ user32.GetCursorPos.restype = wt.BOOL
+ user32.RegisterWindowMessageW.argtypes = [wt.LPCWSTR]
+@@ -555,6 +557,7 @@ def show_menu() -> None:
+     if not menu:
+         return
+     command = 0
++    previous_foreground = user32.GetForegroundWindow()
+     try:
+         user32.AppendMenuW(menu, MF_STRING, ID_OPEN, "打开白霜\tCtrl+Alt+B")
+         user32.AppendMenuW(menu, MF_STRING, ID_RESTART, "重启白霜")
+@@ -565,7 +568,7 @@ def show_menu() -> None:
+ 
+         point = wt.POINT()
+         user32.GetCursorPos(ctypes.byref(point))
+-        # 不先抢前台，点菜单外面时菜单不会收起。
++        # 弹出菜单必须短暂设为前台，菜单关闭后立即还给原应用。
+         user32.SetForegroundWindow(HWND)
+         command = user32.TrackPopupMenu(
+             menu,
+@@ -579,6 +582,8 @@ def show_menu() -> None:
+         user32.PostMessageW(HWND, WM_NULL, 0, 0)
+     finally:
+         user32.DestroyMenu(menu)
++        if previous_foreground and previous_foreground != HWND:
++            user32.SetForegroundWindow(previous_foreground)
+ 
+     if command == ID_OPEN:
+         request_open()
+diff --git a/pyproject.toml b/pyproject.toml
+index 35189d2..1319327 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,6 +1,6 @@
+ [project]
+ name = "baishuang-pet"
+-version = "0.1.3"
++version = "0.1.4"
+ description = "A Windows desktop pet with Codex and DeepSeek Harness integration"
+ readme = "README.md"
+ requires-python = ">=3.10"
+diff --git a/tests/test_no_focus_steal.py b/tests/test_no_focus_steal.py
+new file mode 100644
+index 0000000..b4ce0df
+--- /dev/null
++++ b/tests/test_no_focus_steal.py
+@@ -0,0 +1,60 @@
++from __future__ import annotations
++
++import importlib.util
++import inspect
++import pathlib
++import unittest
++from types import SimpleNamespace
++
++import desktop_pet
++
++
++ROOT = pathlib.Path(__file__).resolve().parent.parent
++
++
++class _RootWithoutLift:
++    def lift(self) -> None:
++        raise AssertionError("root.lift() must not be used for routine updates")
++
++
++class NoFocusStealTests(unittest.TestCase):
++    def test_balance_busy_path_does_not_lift_root(self) -> None:
++        fake_pet = SimpleNamespace(
++            _set_topmost=lambda _topmost: None,
++            root=_RootWithoutLift(),
++            _balance_busy=True,
++            say=lambda *_args, **_kwargs: None,
++        )
++        desktop_pet.Pet.show_balance(fake_pet)
++
++    def test_window_menus_use_non_force_focus(self) -> None:
++        for method in (
++            desktop_pet.Pet._on_menu,
++            desktop_pet.Pet._open_mode_selector,
++        ):
++            source = inspect.getsource(method)
++            with self.subTest(method=method.__name__):
++                self.assertNotIn("focus_force", source)
++                self.assertIn("focus_set", source)
++
++    def test_startup_player_does_not_lift_window(self) -> None:
++        source = inspect.getsource(desktop_pet.StartupAnimationPlayer.play)
++        self.assertNotIn(".lift(", source)
++
++    def test_periodic_topmost_reassert_is_non_activating(self) -> None:
++        source = inspect.getsource(desktop_pet.Pet._set_topmost)
++        self.assertIn("0x0002 | 0x0001 | 0x0010", source)
++
++    def test_tray_menu_restores_previous_foreground(self) -> None:
++        path = ROOT / "pet-tray.py"
++        spec = importlib.util.spec_from_file_location("pet_tray_focus_test", path)
++        assert spec is not None and spec.loader is not None
++        tray = importlib.util.module_from_spec(spec)
++        spec.loader.exec_module(tray)
++        source = inspect.getsource(tray.show_menu)
++        self.assertIn("previous_foreground", source)
++        self.assertIn("SetForegroundWindow(previous_foreground)", source)
++
++
++if __name__ == "__main__":
++    unittest.main()
+-- 
+2.53.0.windows.3
+

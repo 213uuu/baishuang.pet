@@ -1,0 +1,20 @@
+From cefe5b03485728af9186464fceee4a856c1f7b8c Mon Sep 17 00:00:00 2001
+From: 213uuu <2702164818@qq.com>
+Date: Thu, 22 Oct 2026 22:11:15 +0800
+Subject: [PATCH 1/7] Add files via upload
+
+---
+ baishuang-0.1.4.patch.sha256 | 1 +
+ 1 file changed, 1 insertion(+)
+ create mode 100644 baishuang-0.1.4.patch.sha256
+
+diff --git a/baishuang-0.1.4.patch.sha256 b/baishuang-0.1.4.patch.sha256
+new file mode 100644
+index 0000000..953e982
+--- /dev/null
++++ b/baishuang-0.1.4.patch.sha256
+@@ -0,0 +1 @@
++A6F662AD060F8CDCC79EDF018699684C0686823D4840A65138F83316A093FFC5  baishuang-0.1.4.patch
+-- 
+2.53.0.windows.3
+

@@ -1,0 +1,93 @@
+From 434122e00e0bf28c4ee84730c66bcdffef96313e Mon Sep 17 00:00:00 2001
+From: 213uuu <213uuu@users.noreply.github.com>
+Date: Thu, 22 Oct 2026 22:31:20 +0800
+Subject: [PATCH 6/7] Prevent timeout from cutting off game intro
+
+---
+ CHANGELOG.md            |  6 ++++++
+ desktop_pet.py          | 16 ++++++++++++++--
+ pyproject.toml          |  2 +-
+ tests/test_game_loop.py | 12 ++++++++++++
+ 4 files changed, 33 insertions(+), 3 deletions(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index a2a5122..2bb0d6a 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,11 @@
+ # Changelog
+ 
++## 0.1.7 - 2026-10-22
++
++- Fixed a timeout race that reset the game intro to idle before its final frame.
++- One-shot imported animations now always finish before generic state timeout can return to idle.
++- Added a regression test for timeout occurring on the penultimate game-intro frame.
++
+ ## 0.1.6 - 2026-10-22
+ 
+ - Restored reliable popup-menu clicks by briefly forcing focus only for user-opened menus.
+diff --git a/desktop_pet.py b/desktop_pet.py
+index 0fc4d1f..1114d0a 100644
+--- a/desktop_pet.py
++++ b/desktop_pet.py
+@@ -1970,8 +1970,20 @@ class Pet:
+         ):
+             self._start_dual_work_loop()
+ 
+-        # 过渡还在播时不要被"回待机"打断：过渡里含 5 秒定格，整段比目标状态的时长还长
+-        if not self._pending and now > self.state_until and self.state != "idle":
++        current_images = self.frames(self.state)
++        one_shot_needs_finish = (
++            self.state.startswith("anim-")
++            and self.play_once
++            and bool(current_images)
++            and self.frame_index < len(current_images) - 1
++        )
++        # 过渡或一次性动画未播完时，不允许通用超时提前切回待机。
++        if (
++            not self._pending
++            and not one_shot_needs_finish
++            and now > self.state_until
++            and self.state != "idle"
++        ):
+             self.set_state("idle")
+         elif self.state == "idle":
+             idle_seconds = now - self.last_interaction
+diff --git a/pyproject.toml b/pyproject.toml
+index 954f007..11d6007 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,6 +1,6 @@
+ [project]
+ name = "baishuang-pet"
+-version = "0.1.6"
++version = "0.1.7"
+ description = "A Windows desktop pet with Codex and DeepSeek Harness integration"
+ readme = "README.md"
+ requires-python = ">=3.10"
+diff --git a/tests/test_game_loop.py b/tests/test_game_loop.py
+index 4287729..3627edd 100644
+--- a/tests/test_game_loop.py
++++ b/tests/test_game_loop.py
+@@ -101,6 +101,18 @@ class GameLoopPriorityTests(unittest.TestCase):
+         self.assertEqual(self.pet.state, "anim-game-loop")
+         self.assertFalse(self.pet.play_once)
+ 
++    def test_state_timeout_cannot_cut_off_game_intro(self) -> None:
++        self._start_gaming_with_pending_work()
++        self.pet.frame_index = len(self.pet.frames(self.pet.state)) - 2
++        self.pet.state_until = time.time() - 1
++        self.pet._tick_body()
++        self.assertEqual(self.pet.state, "anim-game-intro")
++
++        self.pet._next_work_check = time.time() + 999
++        self.pet._tick_body()
++        self.assertEqual(self.pet.state, "anim-game-loop")
++        self.assertFalse(self.pet.play_once)
++
+ 
+ if __name__ == "__main__":
+     unittest.main()
+-- 
+2.53.0.windows.3
+

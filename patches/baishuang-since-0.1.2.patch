@@ -1,0 +1,1237 @@
+diff --git a/.gitignore b/.gitignore
+index 3d45bda..245fe23 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -44,3 +44,5 @@ Thumbs.db
+ # Generated archives
+ *.zip
+ *.7z
++installer/.build/
++Baishuang-Setup-*.exe
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index bf3478d..363ec2e 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,45 @@
+ # Changelog
+ 
++## 0.1.8 - 2026-10-22
++
++- Added a self-contained single-file Windows installer.
++- Bundled a portable Python runtime so users do not need Python installed.
++- Added per-user installation under `%LOCALAPPDATA%\Baishuang`.
++- Added desktop and Start Menu shortcuts plus a current-user uninstall entry.
++- Added installer source and reproducible build tooling.
++
++## 0.1.7 - 2026-10-22
++
++- Fixed a timeout race that reset the game intro to idle before its final frame.
++- One-shot imported animations now always finish before generic state timeout can return to idle.
++- Added a regression test for timeout occurring on the penultimate game-intro frame.
++
++## 0.1.6 - 2026-10-22
++
++- Restored reliable popup-menu clicks by briefly forcing focus only for user-opened menus.
++- Restored the previous foreground application immediately after the menu closes.
++- Added a real Tk menu regression test that clicks “玩游戏” and verifies the repeating game loop.
++
++## 0.1.5 - 2026-10-22
++
++- Fixed the gaming intro being diverted to work animation by pending work state.
++- Ensured the gaming intro always enters the repeating game loop.
++- Prevented pending work entry from interrupting an active game loop.
++- Added a regression test for gaming under active work detection.
++
++## 0.1.4 - 2026-10-22
++
++- Prevented the pet from stealing foreground focus during startup, balance updates, and periodic topmost refreshes.
++- Kept the pet window topmost with non-activating Win32 flags.
++- Restored the previous foreground application after startup and tray-menu interaction.
++- Added regression tests covering focus and activation behavior.
++
++## 0.1.3 - 2026-10-22
++
++- Shortened the network-blocked balance message to a single line.
++- Stopped appending the pricing-period subtitle to failed balance lookups.
++- Added regression tests for failed and successful balance responses.
++
+ ## 0.1.2 - 2026-10-22
+ 
+ - Removed low-level green spill from sprite contour edges for clean compositing on dark backgrounds.
+diff --git a/README.md b/README.md
+index 7f80321..2869090 100644
+--- a/README.md
++++ b/README.md
+@@ -11,6 +11,7 @@
+ - 透明置顶桌宠窗口，支持拖动、点击、连续点击和右键菜单。
+ - 多个逐帧动作状态与云朵气泡，气泡会根据实际轮廓重新换行和缩放。
+ - 动画边缘经过低强度绿色溢出清理，在深色桌面上不会出现明显绿边。
++- 启动、余额刷新和周期置顶不会抢走当前应用的前台焦点。
+ - 通过 Codex 实时日志与会话文件检测工作状态。
+ - 通过 `DSH_HOME` 会话文件检测 DeepSeek Harness 工作状态。
+ - Codex 与 DSH 同时工作时，播放“多次点击反应 A → 进入工作 → 稳定保持”路径。
+diff --git a/baishuang-0.1.4.patch.sha256 b/baishuang-0.1.4.patch.sha256
+new file mode 100644
+index 0000000..953e982
+--- /dev/null
++++ b/baishuang-0.1.4.patch.sha256
+@@ -0,0 +1 @@
++A6F662AD060F8CDCC79EDF018699684C0686823D4840A65138F83316A093FFC5  baishuang-0.1.4.patch
+diff --git a/desktop_pet.py b/desktop_pet.py
+index 93f6d1c..1114d0a 100644
+--- a/desktop_pet.py
++++ b/desktop_pet.py
+@@ -327,6 +327,31 @@ def cursor_pos() -> tuple[int, int] | None:
+         return None
+ 
+ 
++def foreground_hwnd() -> int:
++    """返回当前前台窗口句柄；受限环境返回 0。"""
++    if sys.platform != "win32":
++        return 0
++    try:
++        user32 = ctypes.windll.user32
++        user32.GetForegroundWindow.restype = ctypes.wintypes.HWND
++        return int(user32.GetForegroundWindow() or 0)
++    except Exception:  # noqa: BLE001
++        return 0
++
++
++def restore_foreground(hwnd: int) -> None:
++    """把键盘焦点还给显示桌宠前的应用，失败时静默。"""
++    if sys.platform != "win32" or not hwnd:
++        return
++    try:
++        user32 = ctypes.windll.user32
++        user32.SetForegroundWindow.argtypes = [ctypes.wintypes.HWND]
++        if int(user32.GetForegroundWindow() or 0) != hwnd:
++            user32.SetForegroundWindow(ctypes.wintypes.HWND(hwnd))
++    except Exception:  # noqa: BLE001
++        pass
++
++
+ def load_pet_mode() -> str:
+     """读取持久化模式；默认立绘模式，未知内容也按立绘模式处理。"""
+     try:
+@@ -358,6 +383,7 @@ class StartupAnimationPlayer:
+         self.after_id: str | None = None
+         self.started_at = 0.0
+         self.last_index = -1
++        self.previous_foreground = 0
+ 
+     @property
+     def active(self) -> bool:
+@@ -370,6 +396,7 @@ class StartupAnimationPlayer:
+         if self.active:
+             log("启动动画已在播放，忽略重复启动请求")
+             return False
++        self.previous_foreground = foreground_hwnd()
+         width, height = STARTUP_ANIMATION_WIDTH, STARTUP_ANIMATION_HEIGHT
+         self.master.update_idletasks()
+         # 不把动画固定在屏幕中央：以白霜当前窗口为基准对齐末帧脚底锚点。
+@@ -404,7 +431,6 @@ class StartupAnimationPlayer:
+         self.window.bind("<Button-1>", self.close)
+         self.window.bind("<Escape>", self.close)
+         self.window.protocol("WM_DELETE_WINDOW", self.close)
+-        self.window.lift()
+         self.started_at = time.monotonic()
+         self.last_index = -1
+         log(
+@@ -475,6 +501,7 @@ GAME_CHAT = "就玩一小会儿，真的。"
+ GAME_LOOP_CHAT = "嗯~ o(*￣▽￣*)o 巴适滴板"
+ WORK_HAPPY_CHAT = "啊，终于结束了，可以休息一下了~"
+ DUAL_WORK_CHAT = "哼，你这家伙到底要让我干什么啊"
++BALANCE_NETWORK_BLOCKED_CHAT = "禁网：双击启动器重开。"
+ BUBBLE_MAX_TEXT_WIDTH_RATIO = 0.86
+ BUBBLE_WRAP_STEP_PX = 6
+ CAUGHT_CHAT = "谁、谁在玩？我只是检查一下它有没有电。"
+@@ -581,6 +608,8 @@ class Pet:
+         # 必须在 tk.Tk() 之前切换桌面：一旦线程有了窗口就再也切不动了
+         self.desktop_note = attach_to_interactive_desktop()
+         self.root = tk.Tk()
++        # 启动阶段先隐藏本体，等入场动画结束时再以不抢焦点的方式显示。
++        self.root.withdraw()
+         self.root.overrideredirect(True)
+         self.root.attributes("-topmost", True)
+         if debug:
+@@ -649,6 +678,8 @@ class Pet:
+         # Tk 9 在当前桌面环境无法分配原生 Menu，右键菜单改用自绘 Toplevel。
+         self._context_menu: tk.Toplevel | None = None
+         self._mode_selector: tk.Toplevel | None = None
++        self._menu_restore_foreground = 0
++        self._selector_restore_foreground = 0
+         self._last_context_menu_at = 0.0
+         self._pet_mode = load_pet_mode()
+         self._extra_menu_mode = self._pet_mode == "animation"
+@@ -836,7 +867,8 @@ class Pet:
+         """先校正首次启动位置，再以桌宠脚底为锚点播放开场动画。"""
+         self._recheck_placement()
+         self.root.update_idletasks()
+-        self.play_startup_animation()
++        if not self.play_startup_animation() and not self._startup_animation.active:
++            self._show_pet_root_passively()
+ 
+     def _set_topmost(self, topmost: bool) -> None:
+         """设置/取消置顶，不移动、不缩放、不抢焦点。
+@@ -881,6 +913,7 @@ class Pet:
+         self._last_context_menu_at = now
+         self._close_context_menu()
+         self._close_mode_selector()
++        self._menu_restore_foreground = foreground_hwnd()
+         menu = tk.Toplevel(self.root)
+         menu.withdraw()
+         menu.overrideredirect(True)
+@@ -956,6 +989,10 @@ class Pet:
+                 menu.destroy()
+             except tk.TclError:
+                 pass
++        previous = self._menu_restore_foreground
++        self._menu_restore_foreground = 0
++        if previous:
++            self.root.after_idle(lambda: restore_foreground(previous))
+ 
+     def _close_mode_selector(self) -> None:
+         selector = self._mode_selector
+@@ -965,9 +1002,14 @@ class Pet:
+                 selector.destroy()
+             except tk.TclError:
+                 pass
++        previous = self._selector_restore_foreground
++        self._selector_restore_foreground = 0
++        if previous:
++            self.root.after_idle(lambda: restore_foreground(previous))
+ 
+     def _open_mode_selector(self) -> None:
+         self._close_mode_selector()
++        self._selector_restore_foreground = foreground_hwnd()
+         selector = tk.Toplevel(self.root)
+         selector.withdraw()
+         selector.overrideredirect(True)
+@@ -1081,6 +1123,8 @@ class Pet:
+             self.say(ACTION_BUBBLES[action], hold=True)
+ 
+         if action == "gaming" and state_name == "anim-game-intro":
++            # 手动选择的游戏动画优先于工作排队，必须先进入游戏循环。
++            self._work_entry_pending = None
+             images = self.frames(state_name)
+             duration_ms = max(1000, len(images) * EXTRA_ACTION_FRAME_MS)
+             self.set_state(
+@@ -1181,6 +1225,7 @@ class Pet:
+         log("Codex 与 DSH 同时工作：反应 A -> 进入工作 -> 保持循环")
+ 
+     def _start_gaming_loop(self) -> None:
++        self._work_entry_pending = None
+         if "anim-game-loop" not in self.states:
+             log("游戏循环帧缺失，回退待机")
+             self.set_state("idle")
+@@ -1195,16 +1240,26 @@ class Pet:
+         self.say(GAME_LOOP_CHAT, hold=True)
+         log("额外动作进入游戏机循环段")
+ 
+-    def play_startup_animation(self) -> None:
++    def play_startup_animation(self) -> bool:
+         now = time.monotonic()
+         if self._startup_animation.active:
+             log("启动动画请求已忽略：当前动画仍在播放")
+-            return
++            return False
+         if now - self._last_startup_animation_started < 2.0:
+             log("启动动画请求已忽略：启动冷却中")
+-            return
++            return False
+         if self._startup_animation.play():
+             self._last_startup_animation_started = now
++            return True
++        return False
++
++    def _show_pet_root_passively(self) -> None:
++        """显示桌宠本体，但不把当前工作应用挤到后台。"""
++        previous = foreground_hwnd()
++        self._startup_animation_hidden = False
++        self.root.deiconify()
++        self._set_topmost(True)
++        restore_foreground(previous)
+ 
+     def _hide_for_startup_animation(self) -> None:
+         """动画期间隐藏桌宠本体，避免它压在入场画面上或被周期性置顶抬起。"""
+@@ -1226,8 +1281,8 @@ class Pet:
+         lift_px = 12
+         self.root.geometry(f"+{x}+{y - lift_px}")
+         self.root.deiconify()
+-        self.root.lift()
+         self._set_topmost(True)
++        restore_foreground(self._startup_animation.previous_foreground)
+         self._next_topmost = time.time() + TOPMOST_REASSERT_SECONDS
+         self.root.after(85, lambda: self.root.geometry(f"+{x}+{y + 3}"))
+         self.root.after(170, lambda: self.root.geometry(f"+{x}+{y}"))
+@@ -1330,7 +1385,6 @@ class Pet:
+     def show_balance(self) -> None:
+         # 余额气泡画在她自己的窗口里，先把窗口提到最上层，避免被别的窗口压住。
+         self._set_topmost(True)
+-        self.root.lift()
+         if self._balance_busy:
+             self.say("还在查呢，催什么催。", hold=True)
+             return
+@@ -1355,7 +1409,6 @@ class Pet:
+             return
+         self._balance_busy = False
+         self._set_topmost(True)
+-        self.root.lift()
+         self.say(result, hold=True)
+ 
+     # ---------------------------------------------------------------- Codex 状态
+@@ -1552,7 +1605,9 @@ class Pet:
+ 
+     def query_balance(self) -> str:
+         result = self._query_balance_value()
+-        return f"{result}\n{self.deepseek_pricing_label()}"
++        if result.startswith("余额 "):
++            return f"{result}\n{self.deepseek_pricing_label()}"
++        return result
+ 
+     def _query_balance_value(self) -> str:
+         base, token = self.api_credentials()
+@@ -1578,12 +1633,9 @@ class Pet:
+                 isinstance(reason, PermissionError)
+                 or getattr(reason, "winerror", None) == 10013
+             ):
+-                return (
+-                    "余额查询失败：当前白霜运行环境禁止联网。"
+-                    "请关闭后双击 start-pet.cmd 重新打开。"
+-                )
+-            detail = str(reason).strip()[:100]
+-            return f"余额查询失败：网络错误（{detail or type(reason).__name__}）"
++                return BALANCE_NETWORK_BLOCKED_CHAT
++            detail = str(reason).strip()[:40]
++            return f"网络异常：{detail or type(reason).__name__}"
+         except Exception as exc:  # noqa: BLE001
+             return f"余额查询失败：{type(exc).__name__}"
+         return self.format_balance(payload)
+@@ -1801,7 +1853,6 @@ class Pet:
+             if (
+                 intro_images
+                 and self.frame_index >= len(intro_images) - 1
+-                and not self._work_entry_pending
+             ):
+                 self._start_gaming_loop()
+         if self.state.startswith("anim-") and self._extra_sequence:
+@@ -1894,6 +1945,7 @@ class Pet:
+             self._work_entry_pending
+             and working
+             and now > self._work_entry_pending_at
++            and self.state not in ("anim-game-intro", "anim-game-loop")
+         ):
+             pending_images = self.frames(self.state)
+             cycle_finished = (
+@@ -1918,8 +1970,20 @@ class Pet:
+         ):
+             self._start_dual_work_loop()
+ 
+-        # 过渡还在播时不要被"回待机"打断：过渡里含 5 秒定格，整段比目标状态的时长还长
+-        if not self._pending and now > self.state_until and self.state != "idle":
++        current_images = self.frames(self.state)
++        one_shot_needs_finish = (
++            self.state.startswith("anim-")
++            and self.play_once
++            and bool(current_images)
++            and self.frame_index < len(current_images) - 1
++        )
++        # 过渡或一次性动画未播完时，不允许通用超时提前切回待机。
++        if (
++            not self._pending
++            and not one_shot_needs_finish
++            and now > self.state_until
++            and self.state != "idle"
++        ):
+             self.set_state("idle")
+         elif self.state == "idle":
+             idle_seconds = now - self.last_interaction
+diff --git a/installer/Installer.cs b/installer/Installer.cs
+new file mode 100644
+index 0000000..caee85e
+--- /dev/null
++++ b/installer/Installer.cs
+@@ -0,0 +1,195 @@
++using System;
++using System.Diagnostics;
++using System.IO;
++using System.IO.Compression;
++using System.Reflection;
++using System.Windows.Forms;
++
++[assembly: AssemblyTitle("Baishuang Setup")]
++[assembly: AssemblyDescription("Baishuang desktop pet installer")]
++[assembly: AssemblyCompany("213uuu")]
++[assembly: AssemblyProduct("Baishuang")]
++[assembly: AssemblyVersion("0.1.8.0")]
++[assembly: AssemblyFileVersion("0.1.8.0")]
++
++internal static class Program
++{
++    private const string PayloadResource = "payload.zip";
++
++    [STAThread]
++    private static void Main(string[] args)
++    {
++        bool silent = HasArgument(args, "--silent");
++        bool noLaunch = HasArgument(args, "--no-launch");
++        string installDirOverride = GetOptionValue(args, "--install-dir");
++        try
++        {
++            if (!silent)
++            {
++                DialogResult answer = MessageBox.Show(
++                    "Install Baishuang for the current Windows user?\n\n" +
++                    "No administrator rights are required.",
++                    "Baishuang Setup",
++                    MessageBoxButtons.OKCancel,
++                    MessageBoxIcon.Information);
++                if (answer != DialogResult.OK) return;
++            }
++
++            string work = Path.Combine(
++                Path.GetTempPath(),
++                "BaishuangSetup-" + Guid.NewGuid().ToString("N"));
++            Directory.CreateDirectory(work);
++            try
++            {
++                string archive = Path.Combine(work, "payload.zip");
++                using (Stream resource = Assembly.GetExecutingAssembly()
++                    .GetManifestResourceStream(PayloadResource))
++                using (FileStream output = File.Create(archive))
++                {
++                    if (resource == null)
++                    {
++                        throw new InvalidDataException("Embedded payload is missing.");
++                    }
++                    resource.CopyTo(output);
++                }
++
++                ZipFile.ExtractToDirectory(archive, work);
++                string target = installDirOverride ?? Path.Combine(
++                    Environment.GetFolderPath(
++                        Environment.SpecialFolder.LocalApplicationData),
++                    "Baishuang");
++                target = Path.GetFullPath(target);
++                Directory.CreateDirectory(target);
++                CopyDirectory(work, target, "payload.zip");
++
++                RunPowerShell(Path.Combine(target, "install.ps1"), target);
++                if (!silent)
++                {
++                    MessageBox.Show(
++                        "Baishuang was installed successfully.\n\n" + target,
++                        "Baishuang Setup",
++                        MessageBoxButtons.OK,
++                        MessageBoxIcon.Information);
++                }
++                if (!noLaunch)
++                {
++                    Process.Start(new ProcessStartInfo
++                    {
++                        FileName = Path.Combine(target, "start-pet.cmd"),
++                        WorkingDirectory = target,
++                        UseShellExecute = true,
++                        WindowStyle = ProcessWindowStyle.Minimized
++                    });
++                }
++            }
++            finally
++            {
++                try { Directory.Delete(work, true); } catch { }
++            }
++        }
++        catch (Exception error)
++        {
++            try
++            {
++                File.WriteAllText(
++                    Path.Combine(Path.GetTempPath(), "BaishuangSetup-error.log"),
++                    error.ToString());
++            }
++            catch { }
++            if (!silent)
++            {
++                MessageBox.Show(
++                    "Installation failed:\n\n" + error.Message,
++                    "Baishuang Setup",
++                    MessageBoxButtons.OK,
++                    MessageBoxIcon.Error);
++            }
++            Environment.ExitCode = 1;
++        }
++    }
++
++    private static bool HasArgument(string[] args, string expected)
++    {
++        foreach (string arg in args)
++        {
++            if (string.Equals(arg, expected, StringComparison.OrdinalIgnoreCase))
++                return true;
++        }
++        return false;
++    }
++
++    private static string GetOptionValue(string[] args, string option)
++    {
++        for (int index = 0; index < args.Length; index++)
++        {
++            if (string.Equals(
++                args[index], option, StringComparison.OrdinalIgnoreCase))
++            {
++                if (index + 1 < args.Length) return args[index + 1];
++                return null;
++            }
++            string prefix = option + "=";
++            if (args[index].StartsWith(
++                prefix, StringComparison.OrdinalIgnoreCase))
++            {
++                return args[index].Substring(prefix.Length);
++            }
++        }
++        return null;
++    }
++
++    private static void CopyDirectory(
++        string source,
++        string destination,
++        string skipFileName)
++    {
++        foreach (string directory in Directory.GetDirectories(
++            source, "*", SearchOption.AllDirectories))
++        {
++            Directory.CreateDirectory(Path.Combine(
++                destination,
++                directory.Substring(source.Length).TrimStart(
++                    Path.DirectorySeparatorChar)));
++        }
++        foreach (string file in Directory.GetFiles(
++            source, "*", SearchOption.AllDirectories))
++        {
++            if (string.Equals(
++                Path.GetFileName(file), skipFileName,
++                StringComparison.OrdinalIgnoreCase)) continue;
++            string target = Path.Combine(
++                destination,
++                file.Substring(source.Length).TrimStart(
++                    Path.DirectorySeparatorChar));
++            Directory.CreateDirectory(Path.GetDirectoryName(target));
++            using (FileStream input = File.OpenRead(file))
++            using (FileStream output = File.Create(target))
++            {
++                input.CopyTo(output);
++            }
++        }
++    }
++
++    private static void RunPowerShell(string scriptPath, string installDir)
++    {
++        ProcessStartInfo startInfo = new ProcessStartInfo
++        {
++            FileName = "powershell.exe",
++            Arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" +
++                scriptPath + "\" -InstallDir \"" + installDir + "\"",
++            UseShellExecute = false,
++            CreateNoWindow = true,
++            WindowStyle = ProcessWindowStyle.Hidden
++        };
++        using (Process process = Process.Start(startInfo))
++        {
++            process.WaitForExit();
++            if (process.ExitCode != 0)
++            {
++                throw new InvalidOperationException(
++                    "Installer configuration failed with exit code " +
++                    process.ExitCode + ".");
++            }
++        }
++    }
++}
+diff --git a/installer/README.md b/installer/README.md
+new file mode 100644
+index 0000000..7f91da6
+--- /dev/null
++++ b/installer/README.md
+@@ -0,0 +1,33 @@
++# Windows Installer
++
++Build a self-contained `setup.exe`:
++
++```powershell
++powershell -NoProfile -ExecutionPolicy Bypass `
++  -File installer\build-setup.ps1
++```
++
++The generated installer:
++
++- installs per-user to `%LOCALAPPDATA%\Baishuang`
++- requires no administrator rights
++- bundles a portable Python runtime
++- creates Desktop and Start Menu shortcuts
++- registers an uninstall entry under the current user
++
++The executable is a standard .NET WinExe with the compressed payload embedded
++as a managed resource:
++
++```text
++.NET installer executable
++embedded payload.zip resource
++```
++
++Silent installation:
++
++```powershell
++.\Baishuang-Setup-0.1.8.exe --silent --no-launch
++```
++
++The installer is unsigned unless a code-signing certificate is supplied
++separately, so Windows SmartScreen may show an unknown-publisher warning.
+diff --git a/installer/build-setup.ps1 b/installer/build-setup.ps1
+new file mode 100644
+index 0000000..0f72515
+--- /dev/null
++++ b/installer/build-setup.ps1
+@@ -0,0 +1,160 @@
++param(
++    [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot),
++    [string]$PythonRoot = "C:\Python314",
++    [string]$OutputPath = ""
++)
++
++$ErrorActionPreference = "Stop"
++$root = [System.IO.Path]::GetFullPath($RepositoryRoot)
++$buildRoot = Join-Path $root "installer\.build"
++$payloadRoot = Join-Path $buildRoot "payload"
++$runtimeRoot = Join-Path $payloadRoot "runtime\python"
++$payloadArchive = Join-Path $buildRoot "payload.zip"
++$stubPath = Join-Path $buildRoot "BaishuangSetup.exe"
++$sourcePath = Join-Path $PSScriptRoot "Installer.cs"
++$iconPath = Join-Path $root "assets\baishuang.ico"
++$csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
++
++if (-not $OutputPath) {
++    $OutputPath = Join-Path (Split-Path -Parent $root) "Baishuang-Setup-0.1.8.exe"
++}
++$OutputPath = [System.IO.Path]::GetFullPath($OutputPath)
++
++if (-not (Test-Path -LiteralPath $csc)) {
++    throw "C# compiler not found: $csc"
++}
++if (-not (Test-Path -LiteralPath $PythonRoot)) {
++    throw "Python runtime not found: $PythonRoot"
++}
++
++if (Test-Path -LiteralPath $buildRoot) {
++    $resolved = [System.IO.Path]::GetFullPath($buildRoot)
++    if (-not $resolved.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
++        throw "Refusing to remove build directory outside repository: $resolved"
++    }
++    Remove-Item -LiteralPath $resolved -Recurse -Force
++}
++New-Item -ItemType Directory -Path $payloadRoot -Force | Out-Null
++New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
++Write-Output "STAGE payload-directories"
++
++$files = @(
++    "desktop_pet.py",
++    "bubble_shape.py",
++    "pet-tray.py",
++    "pet-control.ps1",
++    "start-pet.cmd",
++    "start-pet-silent.vbs",
++    "stop-pet.cmd",
++    "README.md",
++    "LICENSE",
++    "ASSET_LICENSE.md",
++    "THIRD_PARTY_NOTICES.md"
++)
++foreach ($file in $files) {
++    $source = Join-Path $root $file
++    if (Test-Path -LiteralPath $source) {
++        Copy-Item -LiteralPath $source -Destination (Join-Path $payloadRoot $file)
++    }
++}
++foreach ($directory in @("frames", "startup-animation", "fonts", "assets")) {
++    Copy-Item -LiteralPath (Join-Path $root $directory) `
++        -Destination (Join-Path $payloadRoot $directory) -Recurse
++}
++Write-Output "STAGE app-files"
++Copy-Item -LiteralPath (Join-Path $PSScriptRoot "install.ps1") `
++    -Destination (Join-Path $payloadRoot "install.ps1")
++Copy-Item -LiteralPath (Join-Path $PSScriptRoot "uninstall.ps1") `
++    -Destination (Join-Path $payloadRoot "uninstall.ps1")
++
++$pythonFiles = @(
++    "python.exe",
++    "pythonw.exe",
++    "python3.dll",
++    "python314.dll",
++    "LICENSE.txt"
++)
++foreach ($file in $pythonFiles) {
++    Copy-Item -LiteralPath (Join-Path $PythonRoot $file) `
++        -Destination (Join-Path $runtimeRoot $file)
++}
++Write-Output "STAGE python-files"
++foreach ($file in @("vcruntime140.dll", "vcruntime140_1.dll")) {
++    $source = Join-Path $env:WINDIR "System32\$file"
++    $destination = Join-Path $runtimeRoot $file
++    $sourceStream = [System.IO.File]::OpenRead($source)
++    try {
++        $destinationStream = [System.IO.File]::Create($destination)
++        try {
++            $sourceStream.CopyTo($destinationStream)
++        }
++        finally {
++            $destinationStream.Dispose()
++        }
++    }
++    finally {
++        $sourceStream.Dispose()
++    }
++}
++foreach ($directory in @("DLLs", "Lib", "tcl")) {
++    Copy-Item -LiteralPath (Join-Path $PythonRoot $directory) `
++        -Destination (Join-Path $runtimeRoot $directory) -Recurse
++}
++Write-Output "STAGE python-directories"
++
++foreach ($relative in @(
++    "Lib\site-packages",
++    "Lib\test",
++    "Lib\idlelib",
++    "Lib\turtledemo",
++    "Lib\ensurepip"
++)) {
++    $target = Join-Path $runtimeRoot $relative
++    if (Test-Path -LiteralPath $target) {
++        Remove-Item -LiteralPath $target -Recurse -Force
++    }
++}
++Get-ChildItem -LiteralPath $runtimeRoot -Directory -Filter "__pycache__" -Recurse |
++    Remove-Item -Recurse -Force
++Get-ChildItem -LiteralPath $runtimeRoot -File -Recurse |
++    Where-Object { $_.Extension -eq ".pyc" } |
++    Remove-Item -Force
++Write-Output "STAGE prune-runtime"
++
++tar -a -c -f $payloadArchive -C $payloadRoot .
++if ($LASTEXITCODE -ne 0) {
++    throw "Failed to create payload zip."
++}
++Write-Output "STAGE payload-archive"
++
++$outputDirectory = Split-Path -Parent $OutputPath
++if (-not (Test-Path -LiteralPath $outputDirectory)) {
++    New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
++}
++if (Test-Path -LiteralPath $OutputPath) {
++    Remove-Item -LiteralPath $OutputPath -Force
++}
++
++& $csc `
++    /nologo `
++    /target:winexe `
++    /platform:anycpu `
++    /optimize+ `
++    /codepage:65001 `
++    "/win32icon:$iconPath" `
++    "/out:$stubPath" `
++    "/resource:$payloadArchive,payload.zip" `
++    "/r:System.Windows.Forms.dll" `
++    "/r:System.IO.Compression.dll" `
++    "/r:System.IO.Compression.FileSystem.dll" `
++    $sourcePath
++if ($LASTEXITCODE -ne 0) {
++    throw "C# installer compilation failed."
++}
++Write-Output "STAGE compile-stub"
++Copy-Item -LiteralPath $stubPath -Destination $OutputPath -Force
++
++$hash = (Get-FileHash -LiteralPath $OutputPath -Algorithm SHA256).Hash
++Write-Output "SETUP=$OutputPath"
++Write-Output "SIZE_MB=$([Math]::Round((Get-Item $OutputPath).Length / 1MB, 2))"
++Write-Output "SHA256=$hash"
+diff --git a/installer/install.ps1 b/installer/install.ps1
+new file mode 100644
+index 0000000..20193b0
+--- /dev/null
++++ b/installer/install.ps1
+@@ -0,0 +1,120 @@
++param(
++    [Parameter(Mandatory = $true)]
++    [string]$InstallDir
++)
++
++$ErrorActionPreference = "Stop"
++$InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
++$appIcon = Join-Path $InstallDir "assets\baishuang.ico"
++$launcher = Join-Path $InstallDir "start-pet.cmd"
++$uninstallScript = Join-Path $InstallDir "uninstall.ps1"
++
++$control = Join-Path $InstallDir "pet-control.ps1"
++if (Test-Path -LiteralPath $control) {
++    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $control close |
++        Out-Null
++}
++
++$shell = New-Object -ComObject WScript.Shell
++$warnings = New-Object System.Collections.Generic.List[string]
++
++function Add-Warning {
++    param([string]$Message)
++    $warnings.Add($Message)
++}
++
++function New-Shortcut {
++    param(
++        [string]$Path,
++        [string]$Target,
++        [string]$Arguments,
++        [string]$WorkingDirectory,
++        [string]$Icon
++    )
++    try {
++        $shortcut = $shell.CreateShortcut($Path)
++        $shortcut.TargetPath = $Target
++        $shortcut.Arguments = $Arguments
++        $shortcut.WorkingDirectory = $WorkingDirectory
++        $shortcut.IconLocation = "$Icon,0"
++        $shortcut.WindowStyle = 7
++        $shortcut.Save()
++    }
++    catch {
++        Add-Warning "Shortcut failed: $Path - $($_.Exception.Message)"
++    }
++}
++
++$desktopCandidates = @(
++    [Environment]::GetFolderPath("Desktop"),
++    (Join-Path $env:USERPROFILE "OneDrive\Desktop"),
++    (Join-Path $env:USERPROFILE "OneDrive\桌面"),
++    (Join-Path $env:USERPROFILE "Desktop")
++) | Where-Object { $_ }
++$desktop = $desktopCandidates |
++    Where-Object { Test-Path -LiteralPath $_ -PathType Container } |
++    Select-Object -First 1
++if (-not $desktop) {
++    Add-Warning "Desktop folder was not found; desktop shortcut skipped."
++}
++if ($desktop) {
++    New-Shortcut `
++        -Path (Join-Path $desktop "Baishuang.lnk") `
++        -Target $env:ComSpec `
++        -Arguments "/c `"`"$launcher`"`"" `
++        -WorkingDirectory $InstallDir `
++        -Icon $appIcon
++}
++
++$programs = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
++$appMenu = Join-Path $programs "Baishuang"
++try {
++    New-Item -ItemType Directory -Path $appMenu -Force | Out-Null
++    New-Shortcut `
++        -Path (Join-Path $appMenu "Baishuang.lnk") `
++        -Target $env:ComSpec `
++        -Arguments "/c `"`"$launcher`"`"" `
++        -WorkingDirectory $InstallDir `
++        -Icon $appIcon
++
++    $uninstallTarget = $env:ComSpec
++    $uninstallArgs = (
++        "/c powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$uninstallScript`" " +
++        "-InstallDir `"$InstallDir`""
++    )
++    New-Shortcut `
++        -Path (Join-Path $appMenu "Uninstall Baishuang.lnk") `
++        -Target $uninstallTarget `
++        -Arguments $uninstallArgs `
++        -WorkingDirectory $InstallDir `
++        -Icon $appIcon
++}
++catch {
++    Add-Warning "Start Menu shortcuts failed: $($_.Exception.Message)"
++}
++
++try {
++    $version = "0.1.8"
++    $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Baishuang"
++    New-Item -Path $uninstallKey -Force | Out-Null
++    Set-ItemProperty -Path $uninstallKey -Name DisplayName -Value "Baishuang"
++    Set-ItemProperty -Path $uninstallKey -Name DisplayVersion -Value $version
++    Set-ItemProperty -Path $uninstallKey -Name DisplayIcon -Value $appIcon
++    Set-ItemProperty -Path $uninstallKey -Name InstallLocation -Value $InstallDir
++    Set-ItemProperty -Path $uninstallKey -Name Publisher -Value "213uuu"
++    Set-ItemProperty `
++        -Path $uninstallKey `
++        -Name UninstallString `
++        -Value (
++            "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$uninstallScript`" " +
++            "-InstallDir `"$InstallDir`""
++        )
++}
++catch {
++    Add-Warning "Registry uninstall entry failed: $($_.Exception.Message)"
++}
++
++if ($warnings.Count -gt 0) {
++    $warnings | Set-Content -LiteralPath (Join-Path $InstallDir "install-warnings.log") `
++        -Encoding utf8
++}
+diff --git a/installer/uninstall.ps1 b/installer/uninstall.ps1
+new file mode 100644
+index 0000000..8e15643
+--- /dev/null
++++ b/installer/uninstall.ps1
+@@ -0,0 +1,42 @@
++param(
++    [Parameter(Mandatory = $true)]
++    [string]$InstallDir
++)
++
++$ErrorActionPreference = "SilentlyContinue"
++$InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
++Add-Type -AssemblyName System.Windows.Forms
++
++$answer = [System.Windows.Forms.MessageBox]::Show(
++    "Uninstall Baishuang?",
++    "Baishuang",
++    [System.Windows.Forms.MessageBoxButtons]::YesNo,
++    [System.Windows.Forms.MessageBoxIcon]::Question
++)
++if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) {
++    exit 0
++}
++
++$control = Join-Path $InstallDir "pet-control.ps1"
++if (Test-Path -LiteralPath $control) {
++    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $control close |
++        Out-Null
++}
++
++$desktop = [Environment]::GetFolderPath("Desktop")
++if (-not $desktop) {
++    $desktop = Join-Path $env:USERPROFILE "Desktop"
++}
++$desktopShortcut = Join-Path $desktop "Baishuang.lnk"
++Remove-Item -LiteralPath $desktopShortcut -Force
++
++$appMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Baishuang"
++Remove-Item -LiteralPath $appMenu -Recurse -Force
++Remove-Item -LiteralPath "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Baishuang" `
++    -Recurse -Force
++
++$command = Join-Path $env:TEMP ("BaishuangUninstall-" + [guid]::NewGuid().ToString("N") + ".cmd")
++$cleanup = "@echo off`r`ntimeout /t 2 /nobreak >nul`r`nrmdir /s /q `"$InstallDir`"`r`n"
++[System.IO.File]::WriteAllText($command, $cleanup, [System.Text.Encoding]::Default)
++Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "`"$command`"" `
++    -WindowStyle Hidden
+diff --git a/pet-control.ps1 b/pet-control.ps1
+index ec2d1c7..e5d5334 100644
+--- a/pet-control.ps1
++++ b/pet-control.ps1
+@@ -8,7 +8,12 @@ $ErrorActionPreference = 'Stop'
+ $dir = Split-Path -Parent $MyInvocation.MyCommand.Path
+ $pidPath = Join-Path $dir 'pet.pid'
+ $logPath = Join-Path $dir 'pet.log'
+-$pythonw = $env:BAISHUANG_PYTHONW
++$localPythonw = Join-Path $dir 'runtime\python\pythonw.exe'
++$pythonw = if (Test-Path -LiteralPath $localPythonw) {
++    $localPythonw
++} else {
++    $env:BAISHUANG_PYTHONW
++}
+ if ([string]::IsNullOrWhiteSpace($pythonw)) {
+     $pythonw = Get-Command pythonw.exe -ErrorAction SilentlyContinue |
+         Select-Object -First 1 -ExpandProperty Source
+diff --git a/pet-tray.py b/pet-tray.py
+index 67d5106..aa1c606 100644
+--- a/pet-tray.py
++++ b/pet-tray.py
+@@ -284,6 +284,8 @@ user32.TrackPopupMenu.argtypes = [
+ user32.TrackPopupMenu.restype = wt.UINT
+ user32.SetForegroundWindow.argtypes = [wt.HWND]
+ user32.SetForegroundWindow.restype = wt.BOOL
++user32.GetForegroundWindow.argtypes = []
++user32.GetForegroundWindow.restype = wt.HWND
+ user32.GetCursorPos.argtypes = [ctypes.POINTER(wt.POINT)]
+ user32.GetCursorPos.restype = wt.BOOL
+ user32.RegisterWindowMessageW.argtypes = [wt.LPCWSTR]
+@@ -555,6 +557,7 @@ def show_menu() -> None:
+     if not menu:
+         return
+     command = 0
++    previous_foreground = user32.GetForegroundWindow()
+     try:
+         user32.AppendMenuW(menu, MF_STRING, ID_OPEN, "打开白霜\tCtrl+Alt+B")
+         user32.AppendMenuW(menu, MF_STRING, ID_RESTART, "重启白霜")
+@@ -565,7 +568,7 @@ def show_menu() -> None:
+ 
+         point = wt.POINT()
+         user32.GetCursorPos(ctypes.byref(point))
+-        # 不先抢前台，点菜单外面时菜单不会收起。
++        # 弹出菜单必须短暂设为前台，菜单关闭后立即还给原应用。
+         user32.SetForegroundWindow(HWND)
+         command = user32.TrackPopupMenu(
+             menu,
+@@ -579,6 +582,8 @@ def show_menu() -> None:
+         user32.PostMessageW(HWND, WM_NULL, 0, 0)
+     finally:
+         user32.DestroyMenu(menu)
++        if previous_foreground and previous_foreground != HWND:
++            user32.SetForegroundWindow(previous_foreground)
+ 
+     if command == ID_OPEN:
+         request_open()
+diff --git a/pyproject.toml b/pyproject.toml
+index ee79dbe..433ff03 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,6 +1,6 @@
+ [project]
+ name = "baishuang-pet"
+-version = "0.1.2"
++version = "0.1.8"
+ description = "A Windows desktop pet with Codex and DeepSeek Harness integration"
+ readme = "README.md"
+ requires-python = ">=3.10"
+diff --git a/start-pet.cmd b/start-pet.cmd
+index dcb5832..331b9dc 100644
+--- a/start-pet.cmd
++++ b/start-pet.cmd
+@@ -4,7 +4,8 @@ rem Usage: double-click this file in File Explorer (do not paste it into Codex).
+ rem Exit the pet: right-click her, then Exit.  Log: pet.log in this folder.
+ rem Keep this file pure ASCII for compatibility with cmd.exe OEM code pages.
+ setlocal
+-set "PYW=%BAISHUANG_PYTHONW%"
++if exist "%~dp0runtime\python\pythonw.exe" set "PYW=%~dp0runtime\python\pythonw.exe"
++if not defined PYW set "PYW=%BAISHUANG_PYTHONW%"
+ if not defined PYW (
+   for /f "delims=" %%P in ('where pythonw.exe 2^>nul') do (
+     if not defined PYW set "PYW=%%P"
+diff --git a/tests/test_core.py b/tests/test_core.py
+index bfb955d..8c9dd7d 100644
+--- a/tests/test_core.py
++++ b/tests/test_core.py
+@@ -37,6 +37,30 @@ class BalanceTests(unittest.TestCase):
+             "接口通了，但没有余额数据。",
+         )
+ 
++    def test_failed_balance_omits_pricing_label(self) -> None:
++        dummy = SimpleNamespace(
++            _query_balance_value=lambda: pet.BALANCE_NETWORK_BLOCKED_CHAT,
++            deepseek_pricing_label=lambda: self.fail("pricing label must not be appended"),
++        )
++        self.assertEqual(
++            pet.Pet.query_balance(dummy),
++            pet.BALANCE_NETWORK_BLOCKED_CHAT,
++        )
++
++    def test_successful_balance_appends_pricing_label(self) -> None:
++        dummy = SimpleNamespace(
++            _query_balance_value=lambda: "余额 1.00 CNY（充值 1.00 / 赠金 0.00）",
++            deepseek_pricing_label=lambda: "现在是测试时间",
++        )
++        self.assertEqual(
++            pet.Pet.query_balance(dummy),
++            "余额 1.00 CNY（充值 1.00 / 赠金 0.00）\n现在是测试时间",
++        )
++
++    def test_network_blocked_message_is_short_and_single_line(self) -> None:
++        self.assertLessEqual(len(pet.BALANCE_NETWORK_BLOCKED_CHAT), 30)
++        self.assertNotIn("\n", pet.BALANCE_NETWORK_BLOCKED_CHAT)
++
+ 
+ class WorkDetectionTests(unittest.TestCase):
+     def test_dsh_session_write_is_detected(self) -> None:
+diff --git a/tests/test_game_loop.py b/tests/test_game_loop.py
+new file mode 100644
+index 0000000..3627edd
+--- /dev/null
++++ b/tests/test_game_loop.py
+@@ -0,0 +1,118 @@
++from __future__ import annotations
++
++import pathlib
++import time
++import unittest
++from types import SimpleNamespace
++
++import desktop_pet
++
++
++ROOT = pathlib.Path(__file__).resolve().parent.parent
++
++
++class GameLoopPriorityTests(unittest.TestCase):
++    def setUp(self) -> None:
++        desktop_pet.register_bubble_font()
++        self.pet = desktop_pet.Pet(ROOT / "frames", debug=False)
++        self.pet.root.withdraw()
++        self.pet._alive = True
++        self.pet._next_alive_check = time.time() + 999
++        self.pet._next_topmost = time.time() + 999
++        self.pet._next_work_check = 0
++        self.pet._next_extra_idle_check = time.time() + 999
++        self.pet.codex_working = lambda: True
++        self.pet.dsh_working = lambda: False
++        self.pet.codex_alive = lambda: True
++
++    def tearDown(self) -> None:
++        self.pet._startup_animation.close(notify=False)
++        try:
++            for after_id in self.pet.root.tk.splitlist(
++                self.pet.root.tk.call("after", "info")
++            ):
++                self.pet.root.after_cancel(after_id)
++        except Exception:
++            pass
++        self.pet.root.destroy()
++
++    def _start_gaming_with_pending_work(self) -> None:
++        self.pet.set_state("idle")
++        self.pet.was_working = True
++        self.pet._working = True
++        self.pet._codex_working = True
++        self.pet._dsh_working = False
++        self.pet._dual_work_active = False
++        self.pet._work_entry_pending = "normal"
++        self.pet.play_extra_action("gaming", show_action_bubble=False)
++        self.assertEqual(self.pet.state, "anim-game-intro")
++        self.assertIsNone(self.pet._work_entry_pending)
++
++    def test_game_intro_enters_repeating_loop_despite_pending_work(self) -> None:
++        self._start_gaming_with_pending_work()
++        self.pet.frame_index = len(self.pet.frames(self.pet.state)) - 1
++        self.pet._tick_body()
++        self.assertEqual(self.pet.state, "anim-game-loop")
++        self.assertFalse(self.pet.play_once)
++
++    def test_pending_work_does_not_interrupt_game_loop(self) -> None:
++        self._start_gaming_with_pending_work()
++        self.pet.frame_index = len(self.pet.frames(self.pet.state)) - 1
++        self.pet._tick_body()
++        self.pet._work_entry_pending = "normal"
++        self.pet._work_entry_pending_at = time.time() - 1
++        self.pet._next_work_check = time.time() + 999
++        self.pet.frame_index = len(self.pet.frames(self.pet.state)) - 1
++        self.pet._tick_body()
++        self.assertEqual(self.pet.state, "anim-game-loop")
++        self.assertFalse(self.pet.play_once)
++
++    def test_menu_click_starts_gaming_and_enters_loop(self) -> None:
++        self.pet._extra_menu_mode = True
++        self.pet._work_entry_pending = "normal"
++        self.pet._on_menu(SimpleNamespace(x_root=200, y_root=200))
++        self.pet.root.update()
++
++        def labels(widget):
++            result = []
++            for child in widget.winfo_children():
++                try:
++                    if child.winfo_class() == "Label":
++                        result.append(child)
++                except Exception:
++                    pass
++                result.extend(labels(child))
++            return result
++
++        play_items = [
++            item
++            for item in labels(self.pet._context_menu)
++            if item.cget("text") == "玩游戏"
++        ]
++        self.assertTrue(play_items)
++        play_items[0].event_generate("<Button-1>")
++        self.pet.root.update()
++        self.assertEqual(self.pet.state, "anim-game-intro")
++        self.assertIsNone(self.pet._work_entry_pending)
++
++        self.pet.frame_index = len(self.pet.frames(self.pet.state)) - 1
++        self.pet._next_work_check = time.time() + 999
++        self.pet._tick_body()
++        self.assertEqual(self.pet.state, "anim-game-loop")
++        self.assertFalse(self.pet.play_once)
++
++    def test_state_timeout_cannot_cut_off_game_intro(self) -> None:
++        self._start_gaming_with_pending_work()
++        self.pet.frame_index = len(self.pet.frames(self.pet.state)) - 2
++        self.pet.state_until = time.time() - 1
++        self.pet._tick_body()
++        self.assertEqual(self.pet.state, "anim-game-intro")
++
++        self.pet._next_work_check = time.time() + 999
++        self.pet._tick_body()
++        self.assertEqual(self.pet.state, "anim-game-loop")
++        self.assertFalse(self.pet.play_once)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tests/test_no_focus_steal.py b/tests/test_no_focus_steal.py
+new file mode 100644
+index 0000000..c89e5c0
+--- /dev/null
++++ b/tests/test_no_focus_steal.py
+@@ -0,0 +1,61 @@
++from __future__ import annotations
++
++import importlib.util
++import inspect
++import pathlib
++import unittest
++from types import SimpleNamespace
++
++import desktop_pet
++
++
++ROOT = pathlib.Path(__file__).resolve().parent.parent
++
++
++class _RootWithoutLift:
++    def lift(self) -> None:
++        raise AssertionError("root.lift() must not be used for routine updates")
++
++
++class NoFocusStealTests(unittest.TestCase):
++    def test_balance_busy_path_does_not_lift_root(self) -> None:
++        fake_pet = SimpleNamespace(
++            _set_topmost=lambda _topmost: None,
++            root=_RootWithoutLift(),
++            _balance_busy=True,
++            say=lambda *_args, **_kwargs: None,
++        )
++        desktop_pet.Pet.show_balance(fake_pet)
++
++    def test_window_menus_restore_foreground_after_focus(self) -> None:
++        for method in (
++            desktop_pet.Pet._on_menu,
++            desktop_pet.Pet._open_mode_selector,
++        ):
++            source = inspect.getsource(method)
++            with self.subTest(method=method.__name__):
++                self.assertIn("focus_force", source)
++        class_source = inspect.getsource(desktop_pet.Pet)
++        self.assertIn("restore_foreground(previous)", class_source)
++
++    def test_startup_player_does_not_lift_window(self) -> None:
++        source = inspect.getsource(desktop_pet.StartupAnimationPlayer.play)
++        self.assertNotIn(".lift(", source)
++
++    def test_periodic_topmost_reassert_is_non_activating(self) -> None:
++        source = inspect.getsource(desktop_pet.Pet._set_topmost)
++        self.assertIn("0x0002 | 0x0001 | 0x0010", source)
++
++    def test_tray_menu_restores_previous_foreground(self) -> None:
++        path = ROOT / "pet-tray.py"
++        spec = importlib.util.spec_from_file_location("pet_tray_focus_test", path)
++        assert spec is not None and spec.loader is not None
++        tray = importlib.util.module_from_spec(spec)
++        spec.loader.exec_module(tray)
++        source = inspect.getsource(tray.show_menu)
++        self.assertIn("previous_foreground", source)
++        self.assertIn("SetForegroundWindow(previous_foreground)", source)
++
++
++if __name__ == "__main__":
++    unittest.main()

@@ -1,0 +1,117 @@
+From 7a284274529d5be4a5212a3c65cfcaa6ca33eb3d Mon Sep 17 00:00:00 2001
+From: 213uuu <213uuu@users.noreply.github.com>
+Date: Thu, 22 Oct 2026 19:56:44 +0800
+Subject: [PATCH 2/7] Fix network-blocked balance bubble
+
+---
+ CHANGELOG.md       |  6 ++++++
+ desktop_pet.py     | 14 +++++++-------
+ pyproject.toml     |  2 +-
+ tests/test_core.py | 24 ++++++++++++++++++++++++
+ 4 files changed, 38 insertions(+), 8 deletions(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index bf3478d..66407d0 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,11 @@
+ # Changelog
+ 
++## 0.1.3 - 2026-10-22
++
++- Shortened the network-blocked balance message to a single line.
++- Stopped appending the pricing-period subtitle to failed balance lookups.
++- Added regression tests for failed and successful balance responses.
++
+ ## 0.1.2 - 2026-10-22
+ 
+ - Removed low-level green spill from sprite contour edges for clean compositing on dark backgrounds.
+diff --git a/desktop_pet.py b/desktop_pet.py
+index 93f6d1c..98923a4 100644
+--- a/desktop_pet.py
++++ b/desktop_pet.py
+@@ -475,6 +475,7 @@ GAME_CHAT = "就玩一小会儿，真的。"
+ GAME_LOOP_CHAT = "嗯~ o(*￣▽￣*)o 巴适滴板"
+ WORK_HAPPY_CHAT = "啊，终于结束了，可以休息一下了~"
+ DUAL_WORK_CHAT = "哼，你这家伙到底要让我干什么啊"
++BALANCE_NETWORK_BLOCKED_CHAT = "禁网：双击启动器重开。"
+ BUBBLE_MAX_TEXT_WIDTH_RATIO = 0.86
+ BUBBLE_WRAP_STEP_PX = 6
+ CAUGHT_CHAT = "谁、谁在玩？我只是检查一下它有没有电。"
+@@ -1552,7 +1553,9 @@ class Pet:
+ 
+     def query_balance(self) -> str:
+         result = self._query_balance_value()
+-        return f"{result}\n{self.deepseek_pricing_label()}"
++        if result.startswith("余额 "):
++            return f"{result}\n{self.deepseek_pricing_label()}"
++        return result
+ 
+     def _query_balance_value(self) -> str:
+         base, token = self.api_credentials()
+@@ -1578,12 +1581,9 @@ class Pet:
+                 isinstance(reason, PermissionError)
+                 or getattr(reason, "winerror", None) == 10013
+             ):
+-                return (
+-                    "余额查询失败：当前白霜运行环境禁止联网。"
+-                    "请关闭后双击 start-pet.cmd 重新打开。"
+-                )
+-            detail = str(reason).strip()[:100]
+-            return f"余额查询失败：网络错误（{detail or type(reason).__name__}）"
++                return BALANCE_NETWORK_BLOCKED_CHAT
++            detail = str(reason).strip()[:40]
++            return f"网络异常：{detail or type(reason).__name__}"
+         except Exception as exc:  # noqa: BLE001
+             return f"余额查询失败：{type(exc).__name__}"
+         return self.format_balance(payload)
+diff --git a/pyproject.toml b/pyproject.toml
+index ee79dbe..35189d2 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,6 +1,6 @@
+ [project]
+ name = "baishuang-pet"
+-version = "0.1.2"
++version = "0.1.3"
+ description = "A Windows desktop pet with Codex and DeepSeek Harness integration"
+ readme = "README.md"
+ requires-python = ">=3.10"
+diff --git a/tests/test_core.py b/tests/test_core.py
+index bfb955d..8c9dd7d 100644
+--- a/tests/test_core.py
++++ b/tests/test_core.py
+@@ -37,6 +37,30 @@ class BalanceTests(unittest.TestCase):
+             "接口通了，但没有余额数据。",
+         )
+ 
++    def test_failed_balance_omits_pricing_label(self) -> None:
++        dummy = SimpleNamespace(
++            _query_balance_value=lambda: pet.BALANCE_NETWORK_BLOCKED_CHAT,
++            deepseek_pricing_label=lambda: self.fail("pricing label must not be appended"),
++        )
++        self.assertEqual(
++            pet.Pet.query_balance(dummy),
++            pet.BALANCE_NETWORK_BLOCKED_CHAT,
++        )
++
++    def test_successful_balance_appends_pricing_label(self) -> None:
++        dummy = SimpleNamespace(
++            _query_balance_value=lambda: "余额 1.00 CNY（充值 1.00 / 赠金 0.00）",
++            deepseek_pricing_label=lambda: "现在是测试时间",
++        )
++        self.assertEqual(
++            pet.Pet.query_balance(dummy),
++            "余额 1.00 CNY（充值 1.00 / 赠金 0.00）\n现在是测试时间",
++        )
++
++    def test_network_blocked_message_is_short_and_single_line(self) -> None:
++        self.assertLessEqual(len(pet.BALANCE_NETWORK_BLOCKED_CHAT), 30)
++        self.assertNotIn("\n", pet.BALANCE_NETWORK_BLOCKED_CHAT)
++
+ 
+ class WorkDetectionTests(unittest.TestCase):
+     def test_dsh_session_write_is_detected(self) -> None:
+-- 
+2.53.0.windows.3
+

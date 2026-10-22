@@ -1,0 +1,678 @@
+From cef3b2f3dcd7cd6103e7d3462a6827320f832e2a Mon Sep 17 00:00:00 2001
+From: 213uuu <213uuu@users.noreply.github.com>
+Date: Thu, 22 Oct 2026 23:13:34 +0800
+Subject: [PATCH 7/7] Add self-contained Windows installer
+
+---
+ .gitignore                |   2 +
+ CHANGELOG.md              |   8 ++
+ installer/Installer.cs    | 195 ++++++++++++++++++++++++++++++++++++++
+ installer/README.md       |  33 +++++++
+ installer/build-setup.ps1 | 160 +++++++++++++++++++++++++++++++
+ installer/install.ps1     | 120 +++++++++++++++++++++++
+ installer/uninstall.ps1   |  42 ++++++++
+ pet-control.ps1           |   7 +-
+ pyproject.toml            |   2 +-
+ start-pet.cmd             |   3 +-
+ 10 files changed, 569 insertions(+), 3 deletions(-)
+ create mode 100644 installer/Installer.cs
+ create mode 100644 installer/README.md
+ create mode 100644 installer/build-setup.ps1
+ create mode 100644 installer/install.ps1
+ create mode 100644 installer/uninstall.ps1
+
+diff --git a/.gitignore b/.gitignore
+index 3d45bda..245fe23 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -44,3 +44,5 @@ Thumbs.db
+ # Generated archives
+ *.zip
+ *.7z
++installer/.build/
++Baishuang-Setup-*.exe
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 2bb0d6a..363ec2e 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,13 @@
+ # Changelog
+ 
++## 0.1.8 - 2026-10-22
++
++- Added a self-contained single-file Windows installer.
++- Bundled a portable Python runtime so users do not need Python installed.
++- Added per-user installation under `%LOCALAPPDATA%\Baishuang`.
++- Added desktop and Start Menu shortcuts plus a current-user uninstall entry.
++- Added installer source and reproducible build tooling.
++
+ ## 0.1.7 - 2026-10-22
+ 
+ - Fixed a timeout race that reset the game intro to idle before its final frame.
+diff --git a/installer/Installer.cs b/installer/Installer.cs
+new file mode 100644
+index 0000000..caee85e
+--- /dev/null
++++ b/installer/Installer.cs
+@@ -0,0 +1,195 @@
++using System;
++using System.Diagnostics;
++using System.IO;
++using System.IO.Compression;
++using System.Reflection;
++using System.Windows.Forms;
++
++[assembly: AssemblyTitle("Baishuang Setup")]
++[assembly: AssemblyDescription("Baishuang desktop pet installer")]
++[assembly: AssemblyCompany("213uuu")]
++[assembly: AssemblyProduct("Baishuang")]
++[assembly: AssemblyVersion("0.1.8.0")]
++[assembly: AssemblyFileVersion("0.1.8.0")]
++
++internal static class Program
++{
++    private const string PayloadResource = "payload.zip";
++
++    [STAThread]
++    private static void Main(string[] args)
++    {
++        bool silent = HasArgument(args, "--silent");
++        bool noLaunch = HasArgument(args, "--no-launch");
++        string installDirOverride = GetOptionValue(args, "--install-dir");
++        try
++        {
++            if (!silent)
++            {
++                DialogResult answer = MessageBox.Show(
++                    "Install Baishuang for the current Windows user?\n\n" +
++                    "No administrator rights are required.",
++                    "Baishuang Setup",
++                    MessageBoxButtons.OKCancel,
++                    MessageBoxIcon.Information);
++                if (answer != DialogResult.OK) return;
++            }
++
++            string work = Path.Combine(
++                Path.GetTempPath(),
++                "BaishuangSetup-" + Guid.NewGuid().ToString("N"));
++            Directory.CreateDirectory(work);
++            try
++            {
++                string archive = Path.Combine(work, "payload.zip");
++                using (Stream resource = Assembly.GetExecutingAssembly()
++                    .GetManifestResourceStream(PayloadResource))
++                using (FileStream output = File.Create(archive))
++                {
++                    if (resource == null)
++                    {
++                        throw new InvalidDataException("Embedded payload is missing.");
++                    }
++                    resource.CopyTo(output);
++                }
++
++                ZipFile.ExtractToDirectory(archive, work);
++                string target = installDirOverride ?? Path.Combine(
++                    Environment.GetFolderPath(
++                        Environment.SpecialFolder.LocalApplicationData),
++                    "Baishuang");
++                target = Path.GetFullPath(target);
++                Directory.CreateDirectory(target);
++                CopyDirectory(work, target, "payload.zip");
++
++                RunPowerShell(Path.Combine(target, "install.ps1"), target);
++                if (!silent)
++                {
++                    MessageBox.Show(
++                        "Baishuang was installed successfully.\n\n" + target,
++                        "Baishuang Setup",
++                        MessageBoxButtons.OK,
++                        MessageBoxIcon.Information);
++                }
++                if (!noLaunch)
++                {
++                    Process.Start(new ProcessStartInfo
++                    {
++                        FileName = Path.Combine(target, "start-pet.cmd"),
++                        WorkingDirectory = target,
++                        UseShellExecute = true,
++                        WindowStyle = ProcessWindowStyle.Minimized
++                    });
++                }
++            }
++            finally
++            {
++                try { Directory.Delete(work, true); } catch { }
++            }
++        }
++        catch (Exception error)
++        {
++            try
++            {
++                File.WriteAllText(
++                    Path.Combine(Path.GetTempPath(), "BaishuangSetup-error.log"),
++                    error.ToString());
++            }
++            catch { }
++            if (!silent)
++            {
++                MessageBox.Show(
++                    "Installation failed:\n\n" + error.Message,
++                    "Baishuang Setup",
++                    MessageBoxButtons.OK,
++                    MessageBoxIcon.Error);
++            }
++            Environment.ExitCode = 1;
++        }
++    }
++
++    private static bool HasArgument(string[] args, string expected)
++    {
++        foreach (string arg in args)
++        {
++            if (string.Equals(arg, expected, StringComparison.OrdinalIgnoreCase))
++                return true;
++        }
++        return false;
++    }
++
++    private static string GetOptionValue(string[] args, string option)
++    {
++        for (int index = 0; index < args.Length; index++)
++        {
++            if (string.Equals(
++                args[index], option, StringComparison.OrdinalIgnoreCase))
++            {
++                if (index + 1 < args.Length) return args[index + 1];
++                return null;
++            }
++            string prefix = option + "=";
++            if (args[index].StartsWith(
++                prefix, StringComparison.OrdinalIgnoreCase))
++            {
++                return args[index].Substring(prefix.Length);
++            }
++        }
++        return null;
++    }
++
++    private static void CopyDirectory(
++        string source,
++        string destination,
++        string skipFileName)
++    {
++        foreach (string directory in Directory.GetDirectories(
++            source, "*", SearchOption.AllDirectories))
++        {
++            Directory.CreateDirectory(Path.Combine(
++                destination,
++                directory.Substring(source.Length).TrimStart(
++                    Path.DirectorySeparatorChar)));
++        }
++        foreach (string file in Directory.GetFiles(
++            source, "*", SearchOption.AllDirectories))
++        {
++            if (string.Equals(
++                Path.GetFileName(file), skipFileName,
++                StringComparison.OrdinalIgnoreCase)) continue;
++            string target = Path.Combine(
++                destination,
++                file.Substring(source.Length).TrimStart(
++                    Path.DirectorySeparatorChar));
++            Directory.CreateDirectory(Path.GetDirectoryName(target));
++            using (FileStream input = File.OpenRead(file))
++            using (FileStream output = File.Create(target))
++            {
++                input.CopyTo(output);
++            }
++        }
++    }
++
++    private static void RunPowerShell(string scriptPath, string installDir)
++    {
++        ProcessStartInfo startInfo = new ProcessStartInfo
++        {
++            FileName = "powershell.exe",
++            Arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" +
++                scriptPath + "\" -InstallDir \"" + installDir + "\"",
++            UseShellExecute = false,
++            CreateNoWindow = true,
++            WindowStyle = ProcessWindowStyle.Hidden
++        };
++        using (Process process = Process.Start(startInfo))
++        {
++            process.WaitForExit();
++            if (process.ExitCode != 0)
++            {
++                throw new InvalidOperationException(
++                    "Installer configuration failed with exit code " +
++                    process.ExitCode + ".");
++            }
++        }
++    }
++}
+diff --git a/installer/README.md b/installer/README.md
+new file mode 100644
+index 0000000..7f91da6
+--- /dev/null
++++ b/installer/README.md
+@@ -0,0 +1,33 @@
++# Windows Installer
++
++Build a self-contained `setup.exe`:
++
++```powershell
++powershell -NoProfile -ExecutionPolicy Bypass `
++  -File installer\build-setup.ps1
++```
++
++The generated installer:
++
++- installs per-user to `%LOCALAPPDATA%\Baishuang`
++- requires no administrator rights
++- bundles a portable Python runtime
++- creates Desktop and Start Menu shortcuts
++- registers an uninstall entry under the current user
++
++The executable is a standard .NET WinExe with the compressed payload embedded
++as a managed resource:
++
++```text
++.NET installer executable
++embedded payload.zip resource
++```
++
++Silent installation:
++
++```powershell
++.\Baishuang-Setup-0.1.8.exe --silent --no-launch
++```
++
++The installer is unsigned unless a code-signing certificate is supplied
++separately, so Windows SmartScreen may show an unknown-publisher warning.
+diff --git a/installer/build-setup.ps1 b/installer/build-setup.ps1
+new file mode 100644
+index 0000000..0f72515
+--- /dev/null
++++ b/installer/build-setup.ps1
+@@ -0,0 +1,160 @@
++param(
++    [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot),
++    [string]$PythonRoot = "C:\Python314",
++    [string]$OutputPath = ""
++)
++
++$ErrorActionPreference = "Stop"
++$root = [System.IO.Path]::GetFullPath($RepositoryRoot)
++$buildRoot = Join-Path $root "installer\.build"
++$payloadRoot = Join-Path $buildRoot "payload"
++$runtimeRoot = Join-Path $payloadRoot "runtime\python"
++$payloadArchive = Join-Path $buildRoot "payload.zip"
++$stubPath = Join-Path $buildRoot "BaishuangSetup.exe"
++$sourcePath = Join-Path $PSScriptRoot "Installer.cs"
++$iconPath = Join-Path $root "assets\baishuang.ico"
++$csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
++
++if (-not $OutputPath) {
++    $OutputPath = Join-Path (Split-Path -Parent $root) "Baishuang-Setup-0.1.8.exe"
++}
++$OutputPath = [System.IO.Path]::GetFullPath($OutputPath)
++
++if (-not (Test-Path -LiteralPath $csc)) {
++    throw "C# compiler not found: $csc"
++}
++if (-not (Test-Path -LiteralPath $PythonRoot)) {
++    throw "Python runtime not found: $PythonRoot"
++}
++
++if (Test-Path -LiteralPath $buildRoot) {
++    $resolved = [System.IO.Path]::GetFullPath($buildRoot)
++    if (-not $resolved.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
++        throw "Refusing to remove build directory outside repository: $resolved"
++    }
++    Remove-Item -LiteralPath $resolved -Recurse -Force
++}
++New-Item -ItemType Directory -Path $payloadRoot -Force | Out-Null
++New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
++Write-Output "STAGE payload-directories"
++
++$files = @(
++    "desktop_pet.py",
++    "bubble_shape.py",
++    "pet-tray.py",
++    "pet-control.ps1",
++    "start-pet.cmd",
++    "start-pet-silent.vbs",
++    "stop-pet.cmd",
++    "README.md",
++    "LICENSE",
++    "ASSET_LICENSE.md",
++    "THIRD_PARTY_NOTICES.md"
++)
++foreach ($file in $files) {
++    $source = Join-Path $root $file
++    if (Test-Path -LiteralPath $source) {
++        Copy-Item -LiteralPath $source -Destination (Join-Path $payloadRoot $file)
++    }
++}
++foreach ($directory in @("frames", "startup-animation", "fonts", "assets")) {
++    Copy-Item -LiteralPath (Join-Path $root $directory) `
++        -Destination (Join-Path $payloadRoot $directory) -Recurse
++}
++Write-Output "STAGE app-files"
++Copy-Item -LiteralPath (Join-Path $PSScriptRoot "install.ps1") `
++    -Destination (Join-Path $payloadRoot "install.ps1")
++Copy-Item -LiteralPath (Join-Path $PSScriptRoot "uninstall.ps1") `
++    -Destination (Join-Path $payloadRoot "uninstall.ps1")
++
++$pythonFiles = @(
++    "python.exe",
++    "pythonw.exe",
++    "python3.dll",
++    "python314.dll",
++    "LICENSE.txt"
++)
++foreach ($file in $pythonFiles) {
++    Copy-Item -LiteralPath (Join-Path $PythonRoot $file) `
++        -Destination (Join-Path $runtimeRoot $file)
++}
++Write-Output "STAGE python-files"
++foreach ($file in @("vcruntime140.dll", "vcruntime140_1.dll")) {
++    $source = Join-Path $env:WINDIR "System32\$file"
++    $destination = Join-Path $runtimeRoot $file
++    $sourceStream = [System.IO.File]::OpenRead($source)
++    try {
++        $destinationStream = [System.IO.File]::Create($destination)
++        try {
++            $sourceStream.CopyTo($destinationStream)
++        }
++        finally {
++            $destinationStream.Dispose()
++        }
++    }
++    finally {
++        $sourceStream.Dispose()
++    }
++}
++foreach ($directory in @("DLLs", "Lib", "tcl")) {
++    Copy-Item -LiteralPath (Join-Path $PythonRoot $directory) `
++        -Destination (Join-Path $runtimeRoot $directory) -Recurse
++}
++Write-Output "STAGE python-directories"
++
++foreach ($relative in @(
++    "Lib\site-packages",
++    "Lib\test",
++    "Lib\idlelib",
++    "Lib\turtledemo",
++    "Lib\ensurepip"
++)) {
++    $target = Join-Path $runtimeRoot $relative
++    if (Test-Path -LiteralPath $target) {
++        Remove-Item -LiteralPath $target -Recurse -Force
++    }
++}
++Get-ChildItem -LiteralPath $runtimeRoot -Directory -Filter "__pycache__" -Recurse |
++    Remove-Item -Recurse -Force
++Get-ChildItem -LiteralPath $runtimeRoot -File -Recurse |
++    Where-Object { $_.Extension -eq ".pyc" } |
++    Remove-Item -Force
++Write-Output "STAGE prune-runtime"
++
++tar -a -c -f $payloadArchive -C $payloadRoot .
++if ($LASTEXITCODE -ne 0) {
++    throw "Failed to create payload zip."
++}
++Write-Output "STAGE payload-archive"
++
++$outputDirectory = Split-Path -Parent $OutputPath
++if (-not (Test-Path -LiteralPath $outputDirectory)) {
++    New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
++}
++if (Test-Path -LiteralPath $OutputPath) {
++    Remove-Item -LiteralPath $OutputPath -Force
++}
++
++& $csc `
++    /nologo `
++    /target:winexe `
++    /platform:anycpu `
++    /optimize+ `
++    /codepage:65001 `
++    "/win32icon:$iconPath" `
++    "/out:$stubPath" `
++    "/resource:$payloadArchive,payload.zip" `
++    "/r:System.Windows.Forms.dll" `
++    "/r:System.IO.Compression.dll" `
++    "/r:System.IO.Compression.FileSystem.dll" `
++    $sourcePath
++if ($LASTEXITCODE -ne 0) {
++    throw "C# installer compilation failed."
++}
++Write-Output "STAGE compile-stub"
++Copy-Item -LiteralPath $stubPath -Destination $OutputPath -Force
++
++$hash = (Get-FileHash -LiteralPath $OutputPath -Algorithm SHA256).Hash
++Write-Output "SETUP=$OutputPath"
++Write-Output "SIZE_MB=$([Math]::Round((Get-Item $OutputPath).Length / 1MB, 2))"
++Write-Output "SHA256=$hash"
+diff --git a/installer/install.ps1 b/installer/install.ps1
+new file mode 100644
+index 0000000..20193b0
+--- /dev/null
++++ b/installer/install.ps1
+@@ -0,0 +1,120 @@
++param(
++    [Parameter(Mandatory = $true)]
++    [string]$InstallDir
++)
++
++$ErrorActionPreference = "Stop"
++$InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
++$appIcon = Join-Path $InstallDir "assets\baishuang.ico"
++$launcher = Join-Path $InstallDir "start-pet.cmd"
++$uninstallScript = Join-Path $InstallDir "uninstall.ps1"
++
++$control = Join-Path $InstallDir "pet-control.ps1"
++if (Test-Path -LiteralPath $control) {
++    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $control close |
++        Out-Null
++}
++
++$shell = New-Object -ComObject WScript.Shell
++$warnings = New-Object System.Collections.Generic.List[string]
++
++function Add-Warning {
++    param([string]$Message)
++    $warnings.Add($Message)
++}
++
++function New-Shortcut {
++    param(
++        [string]$Path,
++        [string]$Target,
++        [string]$Arguments,
++        [string]$WorkingDirectory,
++        [string]$Icon
++    )
++    try {
++        $shortcut = $shell.CreateShortcut($Path)
++        $shortcut.TargetPath = $Target
++        $shortcut.Arguments = $Arguments
++        $shortcut.WorkingDirectory = $WorkingDirectory
++        $shortcut.IconLocation = "$Icon,0"
++        $shortcut.WindowStyle = 7
++        $shortcut.Save()
++    }
++    catch {
++        Add-Warning "Shortcut failed: $Path - $($_.Exception.Message)"
++    }
++}
++
++$desktopCandidates = @(
++    [Environment]::GetFolderPath("Desktop"),
++    (Join-Path $env:USERPROFILE "OneDrive\Desktop"),
++    (Join-Path $env:USERPROFILE "OneDrive\桌面"),
++    (Join-Path $env:USERPROFILE "Desktop")
++) | Where-Object { $_ }
++$desktop = $desktopCandidates |
++    Where-Object { Test-Path -LiteralPath $_ -PathType Container } |
++    Select-Object -First 1
++if (-not $desktop) {
++    Add-Warning "Desktop folder was not found; desktop shortcut skipped."
++}
++if ($desktop) {
++    New-Shortcut `
++        -Path (Join-Path $desktop "Baishuang.lnk") `
++        -Target $env:ComSpec `
++        -Arguments "/c `"`"$launcher`"`"" `
++        -WorkingDirectory $InstallDir `
++        -Icon $appIcon
++}
++
++$programs = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
++$appMenu = Join-Path $programs "Baishuang"
++try {
++    New-Item -ItemType Directory -Path $appMenu -Force | Out-Null
++    New-Shortcut `
++        -Path (Join-Path $appMenu "Baishuang.lnk") `
++        -Target $env:ComSpec `
++        -Arguments "/c `"`"$launcher`"`"" `
++        -WorkingDirectory $InstallDir `
++        -Icon $appIcon
++
++    $uninstallTarget = $env:ComSpec
++    $uninstallArgs = (
++        "/c powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$uninstallScript`" " +
++        "-InstallDir `"$InstallDir`""
++    )
++    New-Shortcut `
++        -Path (Join-Path $appMenu "Uninstall Baishuang.lnk") `
++        -Target $uninstallTarget `
++        -Arguments $uninstallArgs `
++        -WorkingDirectory $InstallDir `
++        -Icon $appIcon
++}
++catch {
++    Add-Warning "Start Menu shortcuts failed: $($_.Exception.Message)"
++}
++
++try {
++    $version = "0.1.8"
++    $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Baishuang"
++    New-Item -Path $uninstallKey -Force | Out-Null
++    Set-ItemProperty -Path $uninstallKey -Name DisplayName -Value "Baishuang"
++    Set-ItemProperty -Path $uninstallKey -Name DisplayVersion -Value $version
++    Set-ItemProperty -Path $uninstallKey -Name DisplayIcon -Value $appIcon
++    Set-ItemProperty -Path $uninstallKey -Name InstallLocation -Value $InstallDir
++    Set-ItemProperty -Path $uninstallKey -Name Publisher -Value "213uuu"
++    Set-ItemProperty `
++        -Path $uninstallKey `
++        -Name UninstallString `
++        -Value (
++            "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$uninstallScript`" " +
++            "-InstallDir `"$InstallDir`""
++        )
++}
++catch {
++    Add-Warning "Registry uninstall entry failed: $($_.Exception.Message)"
++}
++
++if ($warnings.Count -gt 0) {
++    $warnings | Set-Content -LiteralPath (Join-Path $InstallDir "install-warnings.log") `
++        -Encoding utf8
++}
+diff --git a/installer/uninstall.ps1 b/installer/uninstall.ps1
+new file mode 100644
+index 0000000..8e15643
+--- /dev/null
++++ b/installer/uninstall.ps1
+@@ -0,0 +1,42 @@
++param(
++    [Parameter(Mandatory = $true)]
++    [string]$InstallDir
++)
++
++$ErrorActionPreference = "SilentlyContinue"
++$InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
++Add-Type -AssemblyName System.Windows.Forms
++
++$answer = [System.Windows.Forms.MessageBox]::Show(
++    "Uninstall Baishuang?",
++    "Baishuang",
++    [System.Windows.Forms.MessageBoxButtons]::YesNo,
++    [System.Windows.Forms.MessageBoxIcon]::Question
++)
++if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) {
++    exit 0
++}
++
++$control = Join-Path $InstallDir "pet-control.ps1"
++if (Test-Path -LiteralPath $control) {
++    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $control close |
++        Out-Null
++}
++
++$desktop = [Environment]::GetFolderPath("Desktop")
++if (-not $desktop) {
++    $desktop = Join-Path $env:USERPROFILE "Desktop"
++}
++$desktopShortcut = Join-Path $desktop "Baishuang.lnk"
++Remove-Item -LiteralPath $desktopShortcut -Force
++
++$appMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Baishuang"
++Remove-Item -LiteralPath $appMenu -Recurse -Force
++Remove-Item -LiteralPath "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Baishuang" `
++    -Recurse -Force
++
++$command = Join-Path $env:TEMP ("BaishuangUninstall-" + [guid]::NewGuid().ToString("N") + ".cmd")
++$cleanup = "@echo off`r`ntimeout /t 2 /nobreak >nul`r`nrmdir /s /q `"$InstallDir`"`r`n"
++[System.IO.File]::WriteAllText($command, $cleanup, [System.Text.Encoding]::Default)
++Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "`"$command`"" `
++    -WindowStyle Hidden
+diff --git a/pet-control.ps1 b/pet-control.ps1
+index ec2d1c7..e5d5334 100644
+--- a/pet-control.ps1
++++ b/pet-control.ps1
+@@ -8,7 +8,12 @@ $ErrorActionPreference = 'Stop'
+ $dir = Split-Path -Parent $MyInvocation.MyCommand.Path
+ $pidPath = Join-Path $dir 'pet.pid'
+ $logPath = Join-Path $dir 'pet.log'
+-$pythonw = $env:BAISHUANG_PYTHONW
++$localPythonw = Join-Path $dir 'runtime\python\pythonw.exe'
++$pythonw = if (Test-Path -LiteralPath $localPythonw) {
++    $localPythonw
++} else {
++    $env:BAISHUANG_PYTHONW
++}
+ if ([string]::IsNullOrWhiteSpace($pythonw)) {
+     $pythonw = Get-Command pythonw.exe -ErrorAction SilentlyContinue |
+         Select-Object -First 1 -ExpandProperty Source
+diff --git a/pyproject.toml b/pyproject.toml
+index 11d6007..433ff03 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,6 +1,6 @@
+ [project]
+ name = "baishuang-pet"
+-version = "0.1.7"
++version = "0.1.8"
+ description = "A Windows desktop pet with Codex and DeepSeek Harness integration"
+ readme = "README.md"
+ requires-python = ">=3.10"
+diff --git a/start-pet.cmd b/start-pet.cmd
+index dcb5832..331b9dc 100644
+--- a/start-pet.cmd
++++ b/start-pet.cmd
+@@ -4,7 +4,8 @@ rem Usage: double-click this file in File Explorer (do not paste it into Codex).
+ rem Exit the pet: right-click her, then Exit.  Log: pet.log in this folder.
+ rem Keep this file pure ASCII for compatibility with cmd.exe OEM code pages.
+ setlocal
+-set "PYW=%BAISHUANG_PYTHONW%"
++if exist "%~dp0runtime\python\pythonw.exe" set "PYW=%~dp0runtime\python\pythonw.exe"
++if not defined PYW set "PYW=%BAISHUANG_PYTHONW%"
+ if not defined PYW (
+   for /f "delims=" %%P in ('where pythonw.exe 2^>nul') do (
+     if not defined PYW set "PYW=%%P"
+-- 
+2.53.0.windows.3
+
