@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Runtime state
+pet.log
+pet.log.*
+pet.pid
+pet-fault.log
+pet-mode.txt
+pet-tray.log
+pet-tray.log.*
+pet-tray.pid
+startup-animation.request
+
+# Local configuration and secrets
+.env
+.env.*
+auth.json
+config.toml
+*.secret
+*.token
+
+# Machine-specific shortcuts
+*.lnk
+
+# Backups and historical assets
+*.bak
+*.bak-*
+_backup*/
+frames-gen*-old/
+frames-*-old/
+logs-归档/
+work/
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Generated archives
+*.zip
+*.7z

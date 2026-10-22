@@ -1,0 +1,35 @@
+name: Bug report
+description: Report a reproducible problem with Baishuang
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include API keys, auth files, full session logs, or personal paths.
+  - type: textarea
+    id: symptom
+    attributes:
+      label: Symptom
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+  - type: dropdown
+    id: launch
+    attributes:
+      label: Launch method
+      options:
+        - File Explorer / start-pet.cmd
+        - Tray
+        - Automated sandbox
+        - Other

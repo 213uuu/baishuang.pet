@@ -1,0 +1,114 @@
+[
+  {
+    "state": "extra-caught",
+    "frames": 61,
+    "source_luma": 155.4,
+    "target_luma": 163.28,
+    "gamma": 0.9001,
+    "saturation": 0.92
+  },
+  {
+    "state": "extra-eating",
+    "frames": 73,
+    "source_luma": 151.27,
+    "target_luma": 163.28,
+    "gamma": 0.8536,
+    "saturation": 0.92
+  },
+  {
+    "state": "extra-fidget-a",
+    "frames": 37,
+    "source_luma": 149.61,
+    "target_luma": 163.28,
+    "gamma": 0.836,
+    "saturation": 0.92
+  },
+  {
+    "state": "extra-fidget-b",
+    "frames": 45,
+    "source_luma": 151.17,
+    "target_luma": 163.28,
+    "gamma": 0.8526,
+    "saturation": 0.92
+  },
+  {
+    "state": "extra-gaming",
+    "frames": 44,
+    "source_luma": 152.85,
+    "target_luma": 163.28,
+    "gamma": 0.871,
+    "saturation": 0.92
+  },
+  {
+    "state": "extra-gaming-loop",
+    "frames": 53,
+    "source_luma": 151.47,
+    "target_luma": 163.28,
+    "gamma": 0.8559,
+    "saturation": 0.92
+  },
+  {
+    "state": "extra-happy",
+    "frames": 49,
+    "source_luma": 150.92,
+    "target_luma": 163.28,
+    "gamma": 0.8499,
+    "saturation": 0.92
+  },
+  {
+    "state": "extra-peeking",
+    "frames": 73,
+    "source_luma": 148.15,
+    "target_luma": 163.28,
+    "gamma": 0.8209,
+    "saturation": 0.92
+  },
+  {
+    "state": "extra-protest-a",
+    "frames": 28,
+    "source_luma": 149.65,
+    "target_luma": 163.28,
+    "gamma": 0.8364,
+    "saturation": 0.92
+  },
+  {
+    "state": "extra-protest-b",
+    "frames": 39,
+    "source_luma": 148.7,
+    "target_luma": 163.28,
+    "gamma": 0.8266,
+    "saturation": 0.92
+  },
+  {
+    "state": "extra-shy-a",
+    "frames": 32,
+    "source_luma": 149.42,
+    "target_luma": 163.28,
+    "gamma": 0.834,
+    "saturation": 0.92
+  },
+  {
+    "state": "extra-shy-b",
+    "frames": 35,
+    "source_luma": 150.08,
+    "target_luma": 163.28,
+    "gamma": 0.841,
+    "saturation": 0.92
+  },
+  {
+    "state": "extra-work-a",
+    "frames": 24,
+    "source_luma": 144.15,
+    "target_luma": 163.28,
+    "gamma": 0.7815,
+    "saturation": 0.92
+  },
+  {
+    "state": "extra-work-b",
+    "frames": 32,
+    "source_luma": 143.39,
+    "target_luma": 163.28,
+    "gamma": 0.7743,
+    "saturation": 0.92
+  }
+]

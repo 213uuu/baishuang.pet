@@ -1,0 +1,123 @@
+{
+  "generatedAt": "2026-10-22T00:08:19.2483719+08:00",
+  "sourceFramesRoot": "C:\\Users\\wjy66\\Documents\\Codex\\2026-10-13\\qi\\outputs\\baishuang-pet-app\\frames",
+  "outputFramesRoot": "C:\\Users\\wjy66\\Documents\\Codex\\2026-10-13\\qi\\outputs\\baishuang-pet-app\\frames-rebuild-20261022",
+  "canvas": "432x468",
+  "uniformScale": 0.8952380952380953,
+  "reason": "Align 420px standing animation silhouettes to 376px idle silhouette.",
+  "greenRule": "Remove green-dominant spill, then scale with high-quality alpha resampling.",
+  "states": [
+    {
+      "state": "anim-caught-playing",
+      "frames": 61,
+      "greenPixelsBefore": 8616,
+      "greenPixelsAfter": 0,
+      "opaquePixelsBefore": 3762611,
+      "opaquePixelsAfter": 3757046
+    },
+    {
+      "state": "anim-click-protest-a",
+      "frames": 28,
+      "greenPixelsBefore": 3830,
+      "greenPixelsAfter": 0,
+      "opaquePixelsBefore": 1422424,
+      "opaquePixelsAfter": 1418762
+    },
+    {
+      "state": "anim-click-protest-b",
+      "frames": 39,
+      "greenPixelsBefore": 5362,
+      "greenPixelsAfter": 0,
+      "opaquePixelsBefore": 1951720,
+      "opaquePixelsAfter": 1946855
+    },
+    {
+      "state": "anim-game-intro",
+      "frames": 44,
+      "greenPixelsBefore": 3852,
+      "greenPixelsAfter": 0,
+      "opaquePixelsBefore": 2332233,
+      "opaquePixelsAfter": 2328251
+    },
+    {
+      "state": "anim-game-loop",
+      "frames": 53,
+      "greenPixelsBefore": 4377,
+      "greenPixelsAfter": 0,
+      "opaquePixelsBefore": 2693077,
+      "opaquePixelsAfter": 2688731
+    },
+    {
+      "state": "anim-idle-eat",
+      "frames": 73,
+      "greenPixelsBefore": 7074,
+      "greenPixelsAfter": 0,
+      "opaquePixelsBefore": 3698306,
+      "opaquePixelsAfter": 3689404
+    },
+    {
+      "state": "anim-idle-peek",
+      "frames": 73,
+      "greenPixelsBefore": 12109,
+      "greenPixelsAfter": 0,
+      "opaquePixelsBefore": 3467097,
+      "opaquePixelsAfter": 3458605
+    },
+    {
+      "state": "anim-multi-click-a",
+      "frames": 37,
+      "greenPixelsBefore": 5014,
+      "greenPixelsAfter": 0,
+      "opaquePixelsBefore": 1853241,
+      "opaquePixelsAfter": 1849079
+    },
+    {
+      "state": "anim-multi-click-b",
+      "frames": 45,
+      "greenPixelsBefore": 5971,
+      "greenPixelsAfter": 0,
+      "opaquePixelsBefore": 2264003,
+      "opaquePixelsAfter": 2259714
+    },
+    {
+      "state": "anim-work-start",
+      "frames": 24,
+      "greenPixelsBefore": 2382,
+      "greenPixelsAfter": 0,
+      "opaquePixelsBefore": 1231492,
+      "opaquePixelsAfter": 1229075
+    },
+    {
+      "state": "anim-work-stop-a",
+      "frames": 32,
+      "greenPixelsBefore": 4348,
+      "greenPixelsAfter": 0,
+      "opaquePixelsBefore": 1635538,
+      "opaquePixelsAfter": 1631901
+    },
+    {
+      "state": "anim-work-stop-b",
+      "frames": 35,
+      "greenPixelsBefore": 4764,
+      "greenPixelsAfter": 0,
+      "opaquePixelsBefore": 1790214,
+      "opaquePixelsAfter": 1785925
+    },
+    {
+      "state": "anim-work-success-a",
+      "frames": 32,
+      "greenPixelsBefore": 3201,
+      "greenPixelsAfter": 0,
+      "opaquePixelsBefore": 1668364,
+      "opaquePixelsAfter": 1664239
+    },
+    {
+      "state": "anim-work-success-b",
+      "frames": 49,
+      "greenPixelsBefore": 6207,
+      "greenPixelsAfter": 0,
+      "opaquePixelsBefore": 2483568,
+      "opaquePixelsAfter": 2478205
+    }
+  ]
+}
