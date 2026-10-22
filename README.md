@@ -1,3 +1,5 @@
+### [⬇ 下载 Windows 安装包 Baishuang Setup 0.1.8](INSTALL.md)
+
 # 白霜 · Baishuang
 
 一个面向 Windows 的独立桌面宠物：透明置顶窗口、逐帧动画、云朵气泡、Codex / DeepSeek Harness 工作状态检测，以及 DeepSeek 余额查询。
