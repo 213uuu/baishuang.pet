@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.5 - 2026-10-22
+
+- Fixed the gaming intro being diverted to work animation by pending work state.
+- Ensured the gaming intro always enters the repeating game loop.
+- Prevented pending work entry from interrupting an active game loop.
+- Added a regression test for gaming under active work detection.
+
 ## 0.1.4 - 2026-10-22
 
 - Prevented the pet from stealing foreground focus during startup, balance updates, and periodic topmost refreshes.

@@ -1109,6 +1109,8 @@ class Pet:
             self.say(ACTION_BUBBLES[action], hold=True)
 
         if action == "gaming" and state_name == "anim-game-intro":
+            # 手动选择的游戏动画优先于工作排队，必须先进入游戏循环。
+            self._work_entry_pending = None
             images = self.frames(state_name)
             duration_ms = max(1000, len(images) * EXTRA_ACTION_FRAME_MS)
             self.set_state(
@@ -1209,6 +1211,7 @@ class Pet:
         log("Codex 与 DSH 同时工作：反应 A -> 进入工作 -> 保持循环")
 
     def _start_gaming_loop(self) -> None:
+        self._work_entry_pending = None
         if "anim-game-loop" not in self.states:
             log("游戏循环帧缺失，回退待机")
             self.set_state("idle")
@@ -1836,7 +1839,6 @@ class Pet:
             if (
                 intro_images
                 and self.frame_index >= len(intro_images) - 1
-                and not self._work_entry_pending
             ):
                 self._start_gaming_loop()
         if self.state.startswith("anim-") and self._extra_sequence:
@@ -1929,6 +1931,7 @@ class Pet:
             self._work_entry_pending
             and working
             and now > self._work_entry_pending_at
+            and self.state not in ("anim-game-intro", "anim-game-loop")
         ):
             pending_images = self.frames(self.state)
             cycle_finished = (
