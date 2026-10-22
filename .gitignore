@@ -44,3 +44,5 @@ Thumbs.db
 # Generated archives
 *.zip
 *.7z
+installer/.build/
+Baishuang-Setup-*.exe

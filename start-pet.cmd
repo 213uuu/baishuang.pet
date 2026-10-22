@@ -4,7 +4,8 @@ rem Usage: double-click this file in File Explorer (do not paste it into Codex).
 rem Exit the pet: right-click her, then Exit.  Log: pet.log in this folder.
 rem Keep this file pure ASCII for compatibility with cmd.exe OEM code pages.
 setlocal
-set "PYW=%BAISHUANG_PYTHONW%"
+if exist "%~dp0runtime\python\pythonw.exe" set "PYW=%~dp0runtime\python\pythonw.exe"
+if not defined PYW set "PYW=%BAISHUANG_PYTHONW%"
 if not defined PYW (
   for /f "delims=" %%P in ('where pythonw.exe 2^>nul') do (
     if not defined PYW set "PYW=%%P"

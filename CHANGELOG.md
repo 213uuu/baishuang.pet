@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.8 - 2026-10-22
+
+- Added a self-contained single-file Windows installer.
+- Bundled a portable Python runtime so users do not need Python installed.
+- Added per-user installation under `%LOCALAPPDATA%\Baishuang`.
+- Added desktop and Start Menu shortcuts plus a current-user uninstall entry.
+- Added installer source and reproducible build tooling.
+
 ## 0.1.7 - 2026-10-22
 
 - Fixed a timeout race that reset the game intro to idle before its final frame.

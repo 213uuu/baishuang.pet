@@ -8,7 +8,12 @@ $ErrorActionPreference = 'Stop'
 $dir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $pidPath = Join-Path $dir 'pet.pid'
 $logPath = Join-Path $dir 'pet.log'
-$pythonw = $env:BAISHUANG_PYTHONW
+$localPythonw = Join-Path $dir 'runtime\python\pythonw.exe'
+$pythonw = if (Test-Path -LiteralPath $localPythonw) {
+    $localPythonw
+} else {
+    $env:BAISHUANG_PYTHONW
+}
 if ([string]::IsNullOrWhiteSpace($pythonw)) {
     $pythonw = Get-Command pythonw.exe -ErrorAction SilentlyContinue |
         Select-Object -First 1 -ExpandProperty Source
