@@ -475,6 +475,7 @@ GAME_CHAT = "就玩一小会儿，真的。"
 GAME_LOOP_CHAT = "嗯~ o(*￣▽￣*)o 巴适滴板"
 WORK_HAPPY_CHAT = "啊，终于结束了，可以休息一下了~"
 DUAL_WORK_CHAT = "哼，你这家伙到底要让我干什么啊"
+BALANCE_NETWORK_BLOCKED_CHAT = "禁网：双击启动器重开。"
 BUBBLE_MAX_TEXT_WIDTH_RATIO = 0.86
 BUBBLE_WRAP_STEP_PX = 6
 CAUGHT_CHAT = "谁、谁在玩？我只是检查一下它有没有电。"
@@ -1552,7 +1553,9 @@ class Pet:
 
     def query_balance(self) -> str:
         result = self._query_balance_value()
-        return f"{result}\n{self.deepseek_pricing_label()}"
+        if result.startswith("余额 "):
+            return f"{result}\n{self.deepseek_pricing_label()}"
+        return result
 
     def _query_balance_value(self) -> str:
         base, token = self.api_credentials()
@@ -1578,12 +1581,9 @@ class Pet:
                 isinstance(reason, PermissionError)
                 or getattr(reason, "winerror", None) == 10013
             ):
-                return (
-                    "余额查询失败：当前白霜运行环境禁止联网。"
-                    "请关闭后双击 start-pet.cmd 重新打开。"
-                )
-            detail = str(reason).strip()[:100]
-            return f"余额查询失败：网络错误（{detail or type(reason).__name__}）"
+                return BALANCE_NETWORK_BLOCKED_CHAT
+            detail = str(reason).strip()[:40]
+            return f"网络异常：{detail or type(reason).__name__}"
         except Exception as exc:  # noqa: BLE001
             return f"余额查询失败：{type(exc).__name__}"
         return self.format_balance(payload)

@@ -37,6 +37,30 @@ class BalanceTests(unittest.TestCase):
             "接口通了，但没有余额数据。",
         )
 
+    def test_failed_balance_omits_pricing_label(self) -> None:
+        dummy = SimpleNamespace(
+            _query_balance_value=lambda: pet.BALANCE_NETWORK_BLOCKED_CHAT,
+            deepseek_pricing_label=lambda: self.fail("pricing label must not be appended"),
+        )
+        self.assertEqual(
+            pet.Pet.query_balance(dummy),
+            pet.BALANCE_NETWORK_BLOCKED_CHAT,
+        )
+
+    def test_successful_balance_appends_pricing_label(self) -> None:
+        dummy = SimpleNamespace(
+            _query_balance_value=lambda: "余额 1.00 CNY（充值 1.00 / 赠金 0.00）",
+            deepseek_pricing_label=lambda: "现在是测试时间",
+        )
+        self.assertEqual(
+            pet.Pet.query_balance(dummy),
+            "余额 1.00 CNY（充值 1.00 / 赠金 0.00）\n现在是测试时间",
+        )
+
+    def test_network_blocked_message_is_short_and_single_line(self) -> None:
+        self.assertLessEqual(len(pet.BALANCE_NETWORK_BLOCKED_CHAT), 30)
+        self.assertNotIn("\n", pet.BALANCE_NETWORK_BLOCKED_CHAT)
+
 
 class WorkDetectionTests(unittest.TestCase):
     def test_dsh_session_write_is_detected(self) -> None:

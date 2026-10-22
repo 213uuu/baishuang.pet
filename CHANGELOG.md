@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3 - 2026-10-22
+
+- Shortened the network-blocked balance message to a single line.
+- Stopped appending the pricing-period subtitle to failed balance lookups.
+- Added regression tests for failed and successful balance responses.
+
 ## 0.1.2 - 2026-10-22
 
 - Removed low-level green spill from sprite contour edges for clean compositing on dark backgrounds.
