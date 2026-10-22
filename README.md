@@ -1,4 +1,4 @@
-### [⬇ 下载 Windows 安装包 Baishuang Setup 0.1.8](INSTALL.md)
+### [⬇ 下载 Windows 安装包 · GitHub Releases v0.1.8](https://github.com/213uuu/baishuang.pet/releases/tag/v0.1.8)
 
 # 白霜 · Baishuang
 

@@ -1,3 +1,5 @@
+### [Download Windows Setup · GitHub Releases v0.1.8](https://github.com/213uuu/baishuang.pet/releases/tag/v0.1.8)
+
 # Baishuang Desktop Pet
 
 Baishuang is a Windows desktop pet built with Python and Tk. It combines transparent always-on-top rendering, frame animation, adaptive cloud-shaped speech bubbles, Codex / DeepSeek Harness work detection, and DeepSeek balance lookup.
