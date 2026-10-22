@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.4 - 2026-10-22
+
+- Prevented the pet from stealing foreground focus during startup, balance updates, and periodic topmost refreshes.
+- Kept the pet window topmost with non-activating Win32 flags.
+- Restored the previous foreground application after startup and tray-menu interaction.
+- Added regression tests covering focus and activation behavior.
+
 ## 0.1.3 - 2026-10-22
 
 - Shortened the network-blocked balance message to a single line.

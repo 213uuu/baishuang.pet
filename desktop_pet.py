@@ -327,6 +327,31 @@ def cursor_pos() -> tuple[int, int] | None:
         return None
 
 
+def foreground_hwnd() -> int:
+    """返回当前前台窗口句柄；受限环境返回 0。"""
+    if sys.platform != "win32":
+        return 0
+    try:
+        user32 = ctypes.windll.user32
+        user32.GetForegroundWindow.restype = ctypes.wintypes.HWND
+        return int(user32.GetForegroundWindow() or 0)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def restore_foreground(hwnd: int) -> None:
+    """把键盘焦点还给显示桌宠前的应用，失败时静默。"""
+    if sys.platform != "win32" or not hwnd:
+        return
+    try:
+        user32 = ctypes.windll.user32
+        user32.SetForegroundWindow.argtypes = [ctypes.wintypes.HWND]
+        if int(user32.GetForegroundWindow() or 0) != hwnd:
+            user32.SetForegroundWindow(ctypes.wintypes.HWND(hwnd))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def load_pet_mode() -> str:
     """读取持久化模式；默认立绘模式，未知内容也按立绘模式处理。"""
     try:
@@ -358,6 +383,7 @@ class StartupAnimationPlayer:
         self.after_id: str | None = None
         self.started_at = 0.0
         self.last_index = -1
+        self.previous_foreground = 0
 
     @property
     def active(self) -> bool:
@@ -370,6 +396,7 @@ class StartupAnimationPlayer:
         if self.active:
             log("启动动画已在播放，忽略重复启动请求")
             return False
+        self.previous_foreground = foreground_hwnd()
         width, height = STARTUP_ANIMATION_WIDTH, STARTUP_ANIMATION_HEIGHT
         self.master.update_idletasks()
         # 不把动画固定在屏幕中央：以白霜当前窗口为基准对齐末帧脚底锚点。
@@ -404,7 +431,6 @@ class StartupAnimationPlayer:
         self.window.bind("<Button-1>", self.close)
         self.window.bind("<Escape>", self.close)
         self.window.protocol("WM_DELETE_WINDOW", self.close)
-        self.window.lift()
         self.started_at = time.monotonic()
         self.last_index = -1
         log(
@@ -582,6 +608,8 @@ class Pet:
         # 必须在 tk.Tk() 之前切换桌面：一旦线程有了窗口就再也切不动了
         self.desktop_note = attach_to_interactive_desktop()
         self.root = tk.Tk()
+        # 启动阶段先隐藏本体，等入场动画结束时再以不抢焦点的方式显示。
+        self.root.withdraw()
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
         if debug:
@@ -837,7 +865,8 @@ class Pet:
         """先校正首次启动位置，再以桌宠脚底为锚点播放开场动画。"""
         self._recheck_placement()
         self.root.update_idletasks()
-        self.play_startup_animation()
+        if not self.play_startup_animation() and not self._startup_animation.active:
+            self._show_pet_root_passively()
 
     def _set_topmost(self, topmost: bool) -> None:
         """设置/取消置顶，不移动、不缩放、不抢焦点。
@@ -940,8 +969,7 @@ class Pet:
         menu.bind("<Escape>", lambda _e: self._close_context_menu())
         menu.bind("<FocusOut>", lambda _e: self.root.after_idle(self._close_context_menu))
         menu.deiconify()
-        menu.lift()
-        menu.focus_force()
+        menu.focus_set()
         log("右键菜单已弹出")
         return "break"
 
@@ -1022,8 +1050,7 @@ class Pet:
             lambda _e: self.root.after_idle(self._close_mode_selector),
         )
         selector.deiconify()
-        selector.lift()
-        selector.focus_force()
+        selector.focus_set()
         log("模式选择菜单已弹出")
 
     def _select_pet_mode(self, mode: str) -> None:
@@ -1196,16 +1223,26 @@ class Pet:
         self.say(GAME_LOOP_CHAT, hold=True)
         log("额外动作进入游戏机循环段")
 
-    def play_startup_animation(self) -> None:
+    def play_startup_animation(self) -> bool:
         now = time.monotonic()
         if self._startup_animation.active:
             log("启动动画请求已忽略：当前动画仍在播放")
-            return
+            return False
         if now - self._last_startup_animation_started < 2.0:
             log("启动动画请求已忽略：启动冷却中")
-            return
+            return False
         if self._startup_animation.play():
             self._last_startup_animation_started = now
+            return True
+        return False
+
+    def _show_pet_root_passively(self) -> None:
+        """显示桌宠本体，但不把当前工作应用挤到后台。"""
+        previous = foreground_hwnd()
+        self._startup_animation_hidden = False
+        self.root.deiconify()
+        self._set_topmost(True)
+        restore_foreground(previous)
 
     def _hide_for_startup_animation(self) -> None:
         """动画期间隐藏桌宠本体，避免它压在入场画面上或被周期性置顶抬起。"""
@@ -1227,8 +1264,8 @@ class Pet:
         lift_px = 12
         self.root.geometry(f"+{x}+{y - lift_px}")
         self.root.deiconify()
-        self.root.lift()
         self._set_topmost(True)
+        restore_foreground(self._startup_animation.previous_foreground)
         self._next_topmost = time.time() + TOPMOST_REASSERT_SECONDS
         self.root.after(85, lambda: self.root.geometry(f"+{x}+{y + 3}"))
         self.root.after(170, lambda: self.root.geometry(f"+{x}+{y}"))
@@ -1331,7 +1368,6 @@ class Pet:
     def show_balance(self) -> None:
         # 余额气泡画在她自己的窗口里，先把窗口提到最上层，避免被别的窗口压住。
         self._set_topmost(True)
-        self.root.lift()
         if self._balance_busy:
             self.say("还在查呢，催什么催。", hold=True)
             return
@@ -1356,7 +1392,6 @@ class Pet:
             return
         self._balance_busy = False
         self._set_topmost(True)
-        self.root.lift()
         self.say(result, hold=True)
 
     # ---------------------------------------------------------------- Codex 状态

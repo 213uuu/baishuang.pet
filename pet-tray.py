@@ -284,6 +284,8 @@ user32.TrackPopupMenu.argtypes = [
 user32.TrackPopupMenu.restype = wt.UINT
 user32.SetForegroundWindow.argtypes = [wt.HWND]
 user32.SetForegroundWindow.restype = wt.BOOL
+user32.GetForegroundWindow.argtypes = []
+user32.GetForegroundWindow.restype = wt.HWND
 user32.GetCursorPos.argtypes = [ctypes.POINTER(wt.POINT)]
 user32.GetCursorPos.restype = wt.BOOL
 user32.RegisterWindowMessageW.argtypes = [wt.LPCWSTR]
@@ -555,6 +557,7 @@ def show_menu() -> None:
     if not menu:
         return
     command = 0
+    previous_foreground = user32.GetForegroundWindow()
     try:
         user32.AppendMenuW(menu, MF_STRING, ID_OPEN, "打开白霜\tCtrl+Alt+B")
         user32.AppendMenuW(menu, MF_STRING, ID_RESTART, "重启白霜")
@@ -565,7 +568,7 @@ def show_menu() -> None:
 
         point = wt.POINT()
         user32.GetCursorPos(ctypes.byref(point))
-        # 不先抢前台，点菜单外面时菜单不会收起。
+        # 弹出菜单必须短暂设为前台，菜单关闭后立即还给原应用。
         user32.SetForegroundWindow(HWND)
         command = user32.TrackPopupMenu(
             menu,
@@ -579,6 +582,8 @@ def show_menu() -> None:
         user32.PostMessageW(HWND, WM_NULL, 0, 0)
     finally:
         user32.DestroyMenu(menu)
+        if previous_foreground and previous_foreground != HWND:
+            user32.SetForegroundWindow(previous_foreground)
 
     if command == ID_OPEN:
         request_open()
