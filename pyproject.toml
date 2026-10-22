@@ -1,6 +1,6 @@
 [project]
 name = "baishuang-pet"
-version = "0.1.5"
+version = "0.1.6"
 description = "A Windows desktop pet with Codex and DeepSeek Harness integration"
 readme = "README.md"
 requires-python = ">=3.10"

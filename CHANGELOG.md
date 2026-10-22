@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.6 - 2026-10-22
+
+- Restored reliable popup-menu clicks by briefly forcing focus only for user-opened menus.
+- Restored the previous foreground application immediately after the menu closes.
+- Added a real Tk menu regression test that clicks “玩游戏” and verifies the repeating game loop.
+
 ## 0.1.5 - 2026-10-22
 
 - Fixed the gaming intro being diverted to work animation by pending work state.

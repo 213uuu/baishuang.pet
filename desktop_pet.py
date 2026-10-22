@@ -678,6 +678,8 @@ class Pet:
         # Tk 9 在当前桌面环境无法分配原生 Menu，右键菜单改用自绘 Toplevel。
         self._context_menu: tk.Toplevel | None = None
         self._mode_selector: tk.Toplevel | None = None
+        self._menu_restore_foreground = 0
+        self._selector_restore_foreground = 0
         self._last_context_menu_at = 0.0
         self._pet_mode = load_pet_mode()
         self._extra_menu_mode = self._pet_mode == "animation"
@@ -911,6 +913,7 @@ class Pet:
         self._last_context_menu_at = now
         self._close_context_menu()
         self._close_mode_selector()
+        self._menu_restore_foreground = foreground_hwnd()
         menu = tk.Toplevel(self.root)
         menu.withdraw()
         menu.overrideredirect(True)
@@ -969,7 +972,8 @@ class Pet:
         menu.bind("<Escape>", lambda _e: self._close_context_menu())
         menu.bind("<FocusOut>", lambda _e: self.root.after_idle(self._close_context_menu))
         menu.deiconify()
-        menu.focus_set()
+        menu.lift()
+        menu.focus_force()
         log("右键菜单已弹出")
         return "break"
 
@@ -985,6 +989,10 @@ class Pet:
                 menu.destroy()
             except tk.TclError:
                 pass
+        previous = self._menu_restore_foreground
+        self._menu_restore_foreground = 0
+        if previous:
+            self.root.after_idle(lambda: restore_foreground(previous))
 
     def _close_mode_selector(self) -> None:
         selector = self._mode_selector
@@ -994,9 +1002,14 @@ class Pet:
                 selector.destroy()
             except tk.TclError:
                 pass
+        previous = self._selector_restore_foreground
+        self._selector_restore_foreground = 0
+        if previous:
+            self.root.after_idle(lambda: restore_foreground(previous))
 
     def _open_mode_selector(self) -> None:
         self._close_mode_selector()
+        self._selector_restore_foreground = foreground_hwnd()
         selector = tk.Toplevel(self.root)
         selector.withdraw()
         selector.overrideredirect(True)
@@ -1050,7 +1063,8 @@ class Pet:
             lambda _e: self.root.after_idle(self._close_mode_selector),
         )
         selector.deiconify()
-        selector.focus_set()
+        selector.lift()
+        selector.focus_force()
         log("模式选择菜单已弹出")
 
     def _select_pet_mode(self, mode: str) -> None:

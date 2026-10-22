@@ -3,6 +3,7 @@ from __future__ import annotations
 import pathlib
 import time
 import unittest
+from types import SimpleNamespace
 
 import desktop_pet
 
@@ -26,6 +27,13 @@ class GameLoopPriorityTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.pet._startup_animation.close(notify=False)
+        try:
+            for after_id in self.pet.root.tk.splitlist(
+                self.pet.root.tk.call("after", "info")
+            ):
+                self.pet.root.after_cancel(after_id)
+        except Exception:
+            pass
         self.pet.root.destroy()
 
     def _start_gaming_with_pending_work(self) -> None:
@@ -55,6 +63,40 @@ class GameLoopPriorityTests(unittest.TestCase):
         self.pet._work_entry_pending_at = time.time() - 1
         self.pet._next_work_check = time.time() + 999
         self.pet.frame_index = len(self.pet.frames(self.pet.state)) - 1
+        self.pet._tick_body()
+        self.assertEqual(self.pet.state, "anim-game-loop")
+        self.assertFalse(self.pet.play_once)
+
+    def test_menu_click_starts_gaming_and_enters_loop(self) -> None:
+        self.pet._extra_menu_mode = True
+        self.pet._work_entry_pending = "normal"
+        self.pet._on_menu(SimpleNamespace(x_root=200, y_root=200))
+        self.pet.root.update()
+
+        def labels(widget):
+            result = []
+            for child in widget.winfo_children():
+                try:
+                    if child.winfo_class() == "Label":
+                        result.append(child)
+                except Exception:
+                    pass
+                result.extend(labels(child))
+            return result
+
+        play_items = [
+            item
+            for item in labels(self.pet._context_menu)
+            if item.cget("text") == "玩游戏"
+        ]
+        self.assertTrue(play_items)
+        play_items[0].event_generate("<Button-1>")
+        self.pet.root.update()
+        self.assertEqual(self.pet.state, "anim-game-intro")
+        self.assertIsNone(self.pet._work_entry_pending)
+
+        self.pet.frame_index = len(self.pet.frames(self.pet.state)) - 1
+        self.pet._next_work_check = time.time() + 999
         self.pet._tick_body()
         self.assertEqual(self.pet.state, "anim-game-loop")
         self.assertFalse(self.pet.play_once)

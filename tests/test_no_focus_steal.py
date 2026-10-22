@@ -27,15 +27,16 @@ class NoFocusStealTests(unittest.TestCase):
         )
         desktop_pet.Pet.show_balance(fake_pet)
 
-    def test_window_menus_use_non_force_focus(self) -> None:
+    def test_window_menus_restore_foreground_after_focus(self) -> None:
         for method in (
             desktop_pet.Pet._on_menu,
             desktop_pet.Pet._open_mode_selector,
         ):
             source = inspect.getsource(method)
             with self.subTest(method=method.__name__):
-                self.assertNotIn("focus_force", source)
-                self.assertIn("focus_set", source)
+                self.assertIn("focus_force", source)
+        class_source = inspect.getsource(desktop_pet.Pet)
+        self.assertIn("restore_foreground(previous)", class_source)
 
     def test_startup_player_does_not_lift_window(self) -> None:
         source = inspect.getsource(desktop_pet.StartupAnimationPlayer.play)
