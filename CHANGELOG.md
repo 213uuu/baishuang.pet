@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.7 - 2026-10-22
+
+- Fixed a timeout race that reset the game intro to idle before its final frame.
+- One-shot imported animations now always finish before generic state timeout can return to idle.
+- Added a regression test for timeout occurring on the penultimate game-intro frame.
+
 ## 0.1.6 - 2026-10-22
 
 - Restored reliable popup-menu clicks by briefly forcing focus only for user-opened menus.

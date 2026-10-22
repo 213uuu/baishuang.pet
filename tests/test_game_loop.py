@@ -101,6 +101,18 @@ class GameLoopPriorityTests(unittest.TestCase):
         self.assertEqual(self.pet.state, "anim-game-loop")
         self.assertFalse(self.pet.play_once)
 
+    def test_state_timeout_cannot_cut_off_game_intro(self) -> None:
+        self._start_gaming_with_pending_work()
+        self.pet.frame_index = len(self.pet.frames(self.pet.state)) - 2
+        self.pet.state_until = time.time() - 1
+        self.pet._tick_body()
+        self.assertEqual(self.pet.state, "anim-game-intro")
+
+        self.pet._next_work_check = time.time() + 999
+        self.pet._tick_body()
+        self.assertEqual(self.pet.state, "anim-game-loop")
+        self.assertFalse(self.pet.play_once)
+
 
 if __name__ == "__main__":
     unittest.main()

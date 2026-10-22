@@ -1970,8 +1970,20 @@ class Pet:
         ):
             self._start_dual_work_loop()
 
-        # 过渡还在播时不要被"回待机"打断：过渡里含 5 秒定格，整段比目标状态的时长还长
-        if not self._pending and now > self.state_until and self.state != "idle":
+        current_images = self.frames(self.state)
+        one_shot_needs_finish = (
+            self.state.startswith("anim-")
+            and self.play_once
+            and bool(current_images)
+            and self.frame_index < len(current_images) - 1
+        )
+        # 过渡或一次性动画未播完时，不允许通用超时提前切回待机。
+        if (
+            not self._pending
+            and not one_shot_needs_finish
+            and now > self.state_until
+            and self.state != "idle"
+        ):
             self.set_state("idle")
         elif self.state == "idle":
             idle_seconds = now - self.last_interaction
