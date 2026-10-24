@@ -9,8 +9,8 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("Baishuang desktop pet installer")]
 [assembly: AssemblyCompany("213uuu")]
 [assembly: AssemblyProduct("Baishuang")]
-[assembly: AssemblyVersion("0.1.8.0")]
-[assembly: AssemblyFileVersion("0.1.8.0")]
+[assembly: AssemblyVersion("0.1.9.0")]
+[assembly: AssemblyFileVersion("0.1.9.0")]
 
 internal static class Program
 {

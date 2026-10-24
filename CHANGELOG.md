@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.9 - 2026-10-24
+
+- Suppressed dark green-screen residue throughout all 1,421 runtime sprite frames.
+- Darkened green-biased shadow residue while neutralizing green casts on bright
+  highlights without reducing their luminance.
+- Added a pixel-exact NumPy/Pillow residue-suppression tool.
+- Added regression checks for chroma-key, alpha, and non-edge green suppression.
+- Applied the same green-cast cleanup to the 488-frame startup / animation-view scene.
+- Removed the subtle green fringe around animation-mode character silhouettes.
+- Added an idempotence guard so repeated asset processing cannot keep darkening frames.
+- Changed the Tk transparency key from bright green to dark warm `#110703`,
+  eliminating the runtime green fringe caused by semi-transparent edge blending.
+
 ## 0.1.8 - 2026-10-22
 
 - Added a self-contained single-file Windows installer.

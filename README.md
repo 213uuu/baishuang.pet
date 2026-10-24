@@ -1,4 +1,5 @@
-### [⬇ 下载 Windows 安装包 · GitHub Releases v0.1.8](https://github.com/213uuu/baishuang.pet/releases/tag/v0.1.8)
+### [⬇ 下载 Windows 安装包 · GitHub Releases v0.1.9](https://github.com/213uuu/baishuang.pet/releases/tag/v0.1.9)
+### [AtomGit 镜像仓库 / Release](https://atomgit.com/u213uuu/baishuang.pet)
 
 # 白霜 · Baishuang
 
@@ -12,7 +13,7 @@
 
 - 透明置顶桌宠窗口，支持拖动、点击、连续点击和右键菜单。
 - 多个逐帧动作状态与云朵气泡，气泡会根据实际轮廓重新换行和缩放。
-- 动画边缘经过低强度绿色溢出清理，在深色桌面上不会出现明显绿边。
+- 动画中的暗绿噪点会压成暗灰，角色轮廓一周的绿色偏色也会逐像素清除。
 - 启动、余额刷新和周期置顶不会抢走当前应用的前台焦点。
 - 通过 Codex 实时日志与会话文件检测工作状态。
 - 通过 `DSH_HOME` 会话文件检测 DeepSeek Harness 工作状态。
@@ -26,7 +27,7 @@
 - Windows 10 / 11
 - Python 3.10 或更新版本
 - 运行桌宠本身不需要安装第三方 Python 包
-- 重新生成帧或气泡预览时需要 Pillow
+- 重新生成帧或气泡预览时需要 Pillow；绿幕残留处理还需要 NumPy
 
 ## 快速开始
 

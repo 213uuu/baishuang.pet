@@ -3,7 +3,8 @@
 ## Frame format
 
 - Runtime canvas: `432 x 468`
-- Chroma key: exact `#00ff00`
+- Source chroma key: exact `#00ff00`
+- Runtime transparency key: exact `#110703`
 - Hard alpha: cutout edges are converted to opaque or transparent pixels
 - Runtime animation rate: 12 fps for imported actions
 - Normal state timing is configured in `desktop_pet.py`
@@ -49,17 +50,43 @@ Generate a bubble preview:
 python tools/make_bubble_preview.py docs/bubble-preview.png
 ```
 
-Remove low-level green spill from frame edges:
+Suppress green-biased residue throughout runtime frames:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/despill_animation_edges.ps1 `
-  -InputRoot frames `
-  -OutputRoot work/frames-despilled
+python tools/suppress_green_residue.py `
+  frames `
+  work/frames-green-suppressed
 ```
 
-The processing only modifies contour-edge pixels where the green channel exceeds
-both red and blue. It preserves sprite interiors, alpha geometry, and exact
-`#00ff00` backgrounds.
+The residue processor leaves exact `#00ff00` source-key pixels and fully transparent pixels
+unchanged. Dark pixels with material green bias are desaturated and darkened
+into neutral gray. Bright highlights keep their luminance while only the green
+cast is neutralized. This removes both contour spill and the darker green screen
+noise visible on dark desktops without creating dark blotches in white hair.
+For frames with a real transparent or chroma-key background, every foreground
+pixel touching that background also has `G` clamped to `max(R, B)`, removing the
+one-pixel green fringe around animation-mode silhouettes without changing alpha.
+The processing is idempotent.
+
+Convert the cleaned source-key pixels to the dark runtime key used by Tk:
+
+```powershell
+python tools/recolor_runtime_key.py `
+  frames `
+  work/frames-runtime-key
+```
+
+This final recolor is required: Tk blends semi-transparent sprite edges with the
+window background, so retaining a bright green key causes a visible green fringe.
+
+The RGB startup / “watch animation” scene can use the same processor. It receives
+the same green-cast neutralization while retaining its opaque scene background:
+
+```powershell
+python tools/suppress_green_residue.py `
+  startup-animation/frames `
+  work/startup-animation-green-suppressed
+```
 
 ## Asset history
 

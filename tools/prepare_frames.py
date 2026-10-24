@@ -15,6 +15,9 @@ import sys
 from PIL import Image
 
 
+RUNTIME_CHROMA = (17, 7, 3)
+
+
 def main() -> None:
     if len(sys.argv) != 3:
         raise SystemExit(__doc__)
@@ -26,9 +29,9 @@ def main() -> None:
         out_dir.mkdir(parents=True, exist_ok=True)
         for png in sorted(state_dir.glob("*.png")):
             image = Image.open(png).convert("RGBA")
-            # 硬 alpha：避免半透明边缘在 -transparentcolor 下露绿边
+            # 硬 alpha；深中性键避免半透明边缘与绿色画布混合成绿边
             alpha = image.getchannel("A").point(lambda v: 255 if v > 128 else 0)
-            flat = Image.new("RGBA", image.size, (0, 255, 0, 255))
+            flat = Image.new("RGBA", image.size, (*RUNTIME_CHROMA, 255))
             flat.paste(image, (0, 0), alpha)
             flat.convert("RGB").save(out_dir / png.name)
             total += 1

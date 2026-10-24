@@ -1,4 +1,5 @@
-### [Download Windows Setup · GitHub Releases v0.1.8](https://github.com/213uuu/baishuang.pet/releases/tag/v0.1.8)
+### [Download Windows Setup · GitHub Releases v0.1.9](https://github.com/213uuu/baishuang.pet/releases/tag/v0.1.9)
+### [AtomGit mirror / releases](https://atomgit.com/u213uuu/baishuang.pet)
 
 # Baishuang Desktop Pet
 
@@ -11,7 +12,7 @@ Baishuang is a Windows desktop pet built with Python and Tk. It combines transpa
 - Windows 10 or 11
 - Python 3.10+
 - No third-party packages are needed to run the pet
-- Pillow is only needed for asset-generation tools
+- Pillow is needed for asset-generation tools; green-residue processing also uses NumPy
 
 ## Run
 

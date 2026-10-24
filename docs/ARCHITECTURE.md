@@ -3,7 +3,9 @@
 ## Runtime
 
 `desktop_pet.py` is a Tk application. The sprite is drawn on a transparent
-canvas with the exact chroma key `#00ff00`. Speech bubbles are polygons built
+canvas with the dark warm runtime key `#110703`. Source green-screen pixels
+are recolored to this key during asset preparation so semi-transparent edges do
+not pick up a green fringe. Speech bubbles are polygons built
 from `bubble_shape.py`.
 
 `pet-control.ps1` owns process startup and shutdown. `pet-tray.py` provides an

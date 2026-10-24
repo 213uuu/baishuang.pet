@@ -16,7 +16,7 @@ $iconPath = Join-Path $root "assets\baishuang.ico"
 $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 
 if (-not $OutputPath) {
-    $OutputPath = Join-Path (Split-Path -Parent $root) "Baishuang-Setup-0.1.8.exe"
+    $OutputPath = Join-Path (Split-Path -Parent $root) "Baishuang-Setup-0.1.9.exe"
 }
 $OutputPath = [System.IO.Path]::GetFullPath($OutputPath)
 

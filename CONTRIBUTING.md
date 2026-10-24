@@ -13,7 +13,8 @@ python -m py_compile desktop_pet.py bubble_shape.py pet-tray.py
 - Keep runtime dependencies limited to the Python standard library.
 - Do not commit credentials, logs, PID files, or local configuration.
 - Include a regression test for behavioral fixes when possible.
-- Preserve the exact chroma key `#00ff00` in runtime sprite frames.
+- Source artwork may use `#00ff00` while cleaning; final runtime frames use the
+  dark warm transparency key `#110703`.
 - Document changes to frame directories or animation state names.
 
 ## Artwork changes
@@ -23,7 +24,7 @@ Large animation changes should include:
 - source or generation notes
 - frame count and canvas size
 - a visual comparison
-- confirmation that backgrounds remain exactly `#00ff00`
+- confirmation that backgrounds were recolored to the exact runtime key `#110703`
 
 ## Commit style
 

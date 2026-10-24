@@ -26,7 +26,7 @@ embedded payload.zip resource
 Silent installation:
 
 ```powershell
-.\Baishuang-Setup-0.1.8.exe --silent --no-launch
+.\Baishuang-Setup-0.1.9.exe --silent --no-launch
 ```
 
 The installer is unsigned unless a code-signing certificate is supplied

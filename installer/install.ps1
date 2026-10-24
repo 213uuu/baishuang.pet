@@ -94,7 +94,7 @@ catch {
 }
 
 try {
-    $version = "0.1.8"
+    $version = "0.1.9"
     $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Baishuang"
     New-Item -Path $uninstallKey -Force | Out-Null
     Set-ItemProperty -Path $uninstallKey -Name DisplayName -Value "Baishuang"
